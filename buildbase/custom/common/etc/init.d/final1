@@ -1,0 +1,7 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          final1
+# Required-Start:    single
+# Default-Start:     1
+# Short-Description: target for single 
+### END INIT INFO

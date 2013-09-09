@@ -1,0 +1,2 @@
+
+sdprimer: sdprimer.c

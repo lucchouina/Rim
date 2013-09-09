@@ -1,0 +1,158 @@
+/*
+#
+#
+# This is the Port Forwarding Request config file for the Port Forwarding Deamon
+# The deamon pipes it throught cpp -P
+#
+# PFD itself reads additional files like conf/nodes to add additional macros to
+# the CPP instanciation. PFD thus prepends the conf/pfrs with a set of defines.
+# For example hostN #defines are passed based on the number scheme specified in the 'hosts' file.
+# PFD can be started with additional defines. On the scComE node it is started with the -DONTARGET
+# which is used extensively here. This enables sharing of the file between the simulaiton hosts and
+# the targets themselves.
+#
+#   The resulting format will be:
+#
+#    source destination flags
+#    where source and destination have the following format:
+#    [host]:proto:port
+#    
+#    By default 'host' is localhost if field is empty.
+#    
+#    Examples :
+#    
+#    :unix:/tmp/socket   : listen or forward to a local Unix socket file
+#    :tcp:12012 hostfoo:tcp:telnet  telnet # forward localhost connections on 12012 to telnet port on hostfoo
+#    
+#    flags can be a comma separated list of:
+#    
+#    telnet      :   handle initial "char" mode handshake
+#    multi       :   Accept multiple connection requests to this port.
+#
+#   All item numbers start at 1 not 0. Chassis, slot and node.
+#
+*/
+
+//
+// NB: do not leave any spaces in those definitions. PFD expects a number of fields
+//     separated by white spaces.
+// NB: The special character '^' will be replaced by a NEWLINE for PFD parsing.
+
+// base value to all PFD ports
+#define PORTS_BASE (10000)
+
+// Number of slots per chassis
+#define SLOTS_PER_CHASSIS  4
+
+// Number of ports assigned to each node
+#define PORTS_PER_NODE     100
+
+// Number of nodes assigned to each slot
+#define NODES_PER_SLOT     1
+
+// The BASE_CHASSIS is the value of the first port available for a given chassis #
+#define BASE_CHASSIS(cnum)  (PORTS_BASE+(((cnum)-1)*(SLOTS_PER_CHASSIS*NODES_PER_SLOT*PORTS_PER_NODE)))
+
+// BASE_SLOT is the start value for ports assigned to a slot of the chassis
+#define BASE_SLOT(cnum,snum)  (BASE_CHASSIS(cnum)+(((snum)-1)*NODES_PER_SLOT))
+
+// BASE_NODE gets us the start port # for all nodes on a slot
+#define BASE_NODE(cnum,snum,nnum) (BASE_SLOT(cnum,snum)+(((nnum)-1)*PORTS_PER_NODE))
+
+// Root directory on each simulation blade for the serial port for VmWare 
+// consoles (Unix Sockets)
+#define spath /tmp/csm
+
+// some well known port offsets
+#define TELNET_OFFSET           0
+#define GDBSERVER_OFFSET        1
+
+// redifine standard ports.
+// These could be changed to non-standard port numbers
+#define TARGET_TELNET_PORT      23
+#define TARGET_GDBSEVER         2345
+#define TARGET_SSH              22
+
+#ifdef ONTARGET
+// no serial port forwarding on target of course
+#define tcpToS(cnum,snum,nnum)
+// the pfd program (client code) triggers on the  'slotNode_' prefix to 
+// perform mapping of slot/node to IP on the fly.
+#define toIp(cnum, snum, nnum) slotNode_##snum##_##nnum  
+// so that we can use the same config directory here
+// we redefine host1 to INADDR_ANY
+#define host1   0.0.0.0
+#else
+// Well know name for chassis. The PFD will try to resolve cIpN from the normal
+// name resolution (gethostbyname()) failing that it will take this as a pointer
+// to a chassis that will be registering later though broadcast.
+// When the new chassis comes up it will it's pfd client will broadcast and exchange 
+// chassis number with the pfd server.
+#define toIp(cnum,snum,nnum) cIp##cnum
+// TCP to serial for support of VmWare consoles on Unix Sockets.
+#define tcpToS(cnum,snum,nnum)                                          \
+        host##cnum##:tcp:BASE_NODE(cnum,snum,nnum)+SERIAL_OFFSET        \
+        :afunix:spath/##nnum                     \
+        telnet,multi,coord=cnum:snum:nnum,name=console
+#define host1   0.0.0.0
+#endif
+
+//
+// Definition of the proxied ports for chassis linecards
+// The remote port is be by the chassis master node (scComE for atca)
+// which (we assume here) support the same port layout.
+//
+// support for gdbserver connection 
+#define prxy_tcpToGdb(cnum,snum,nnum)                                       \
+        0.0.0.0:tcp:BASE_NODE(cnum,snum,nnum)+GDBSERVER_OFFSET         \
+        toIp(cnum,snum,nnum):tcp:BASE_NODE(1,snum,nnum)+GDBSERVER_OFFSET    \
+        coord=cnum:snum:nnum,name=gdbserver
+        
+// support for telnet
+#define prxy_toTelnet(cnum,snum,nnum)                                   \
+        0.0.0.0:tcp:BASE_NODE(cnum,snum,nnum)+TELNET_OFFSET        \
+        toIp(cnum,snum,nnum):tcp:BASE_NODE(1,snum,nnum)+TELNET_OFFSET   \
+        multi,telnet,coord=cnum:snum:nnum,name=telnet
+
+//
+// Definition of direct ports for chassis master mode
+//
+// One line of TCP to serial
+// support for gdbserver connection 
+#define direct_tcpToGdb(cnum,snum,nnum)                                 \
+        0.0.0.0:tcp:BASE_NODE(cnum,snum,nnum)+GDBSERVER_OFFSET     \
+        toIp(cnum,snum,nnum):tcp:TARGET_GDBSEVER                        \
+        coord=cnum:snum:nnum,name=gdbserver
+
+// support for telnet
+#define direct_toTelnet(cnum,snum,nnum)                                 \
+        0.0.0.0:tcp:BASE_NODE(cnum,snum,nnum)+TELNET_OFFSET        \
+        toIp(cnum,snum,nnum):tcp:TARGET_TELNET_PORT                     \
+        multi,telnet,coord=cnum:snum:nnum,name=telnet
+
+/*
+# create some well know names that we can use right here in the config
+# Those well known names can also be used for development perposes and
+# reporting. A tool could connect to the control port of PFD and ask for
+# the port # associated with a chassis:type:instance tripplet.
+*/
+
+#define prxy_ports(cnum,snum,inum) \
+    prxy_tcpToGdb(cnum,snum,inum)^\
+    prxy_toTelnet(cnum,snum,inum)^
+
+#define direct_ports(cnum,snum,inum) \
+    tcpToS(cnum,snum,inum)
+
+
+#define payload(cnum,snum) \
+    prxy_ports(cnum,snum,1)
+#define control(cnum,snum) \
+    prxy_ports(cnum,snum,1)
+    
+#define ngChassis(cnum)\
+    control(cnum, 1) \
+    payload(cnum, 3) \
+
+// chassis numbers beging at 1 (not 0). Like slot and node.
+ngChassis(1)

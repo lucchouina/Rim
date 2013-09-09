@@ -1,0 +1,322 @@
+<?xml version='1.0' ?>
+<!--
+    This file contained the information necessary in order to manage access to source.
+    Git and SVN are supported for now.
+    
+    In includes:
+    
+    -- scstypes : array of scstype
+       A set of hooks that will be used for various actions with the source.
+       Checkout, updates etc...
+       
+    -- repositories : array of repo
+       Each of these entries are referenced by one or more source entries.
+       They give name to each repo, it's type and how to access it.
+       
+    -- sources : array of scs (Source Control System)
+       Each os these entries is referenced my multiple components of the App.xml
+       These are also referenced by the branch cpecs (this means components that
+       hsrae the same scs reference must share the same scs version in the branch spec
+       used for that product).
+       
+       It gives the opportunity to prefix each top directory of the scs with a some
+       unique string.  For svn repos, this is important so that the branch itself
+       in not just somthing like /branches/1.0 or /branches/1.2 but something like
+       /branches/databaseApi_1.0, where a prefix of 'databaseApi_' would have been
+       specified here.
+       
+-->
+<scs>
+    <!-- SCS attributes -->
+    <scstypes>
+        <scstype name="subversion" subtrees="True" >
+            <!-- checkout - environment has all the fields form the corresponding scs block (in uppercase)
+                 like $SERVER, $CONTYPE
+                 Plus $SRC - checkout path to supply to server
+                 and  $BRANCH - Branch where these files shold com efrom
+                 and  $DST - distectination directory to checkout into
+            -->
+            <script action="checkout" interpreter="bash">
+                <![CDATA[
+                    #
+                    # ROOT: top of branches on repository (by convention, /branches)
+                    # CONTYPE : either svn, http or https
+                    # DST : local directory where this branch should be extraced too
+                    mkdir -p ${DST}
+                    echo svn co -r${REVISION} $$SVNUSER $$SVNPASSWORD -q ${OPTIONS} ${CONTYPE}://${SERVER}:${PORT}${ROOT}/${BRANCH}/${SRC} ${DST} > /dev/tty
+                    svn co -r${REVISION} $$SVNUSER $$SVNPASSWORD  -q ${OPTIONS} ${CONTYPE}://${SERVER}:${PORT}${ROOT}/${BRANCH}/${SRC} ${DST} || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="merge" interpreter="bash">
+                <![CDATA[
+                    #
+                    # ROOT: top of branches on repository (by convention, /branches)
+                    # CONTYPE : either svn, http or https
+                    # DST : local directory where this branch should be extraced too
+                    # PARENT: parent branch name
+                    if [ "$PARENT" ]
+                    then
+                        echo ===${SRC}===> /dev/tty
+                        echo svn merge -r0:41752 --accept postpone -q ${OPTIONS} ${CONTYPE}://${SERVER}:${PORT}${ROOT}/${PARENT}/${SRC} ${DST} > /dev/tty
+                        svn merge -r0:${REVISION} --accept postpone -q ${OPTIONS} ${CONTYPE}://${SERVER}:${PORT}${ROOT}/${PARENT}/${SRC} ${DST} || exit 1
+                    fi
+                    exit 0
+                 ]]>
+            </script>
+            <!-- return a unique revision id for this location -->
+            <script action="revision" interpreter="bash">
+                <![CDATA[
+                    if [ -d ${DST} ] 
+                    then
+                        svn info ${DST} | egrep '^Revision' | awk '{print $$2}' 2>/dev/null || exit 1
+                    else
+                        echo "Unknown"
+                    fi
+                    exit 0
+                 ]]>
+            </script>
+            <script action="view" interpreter="bash">
+                <![CDATA[
+                    if [ -d ${DST} ] 
+                    then
+                        svn info ${DST} | egrep '^URL' | awk '{print $$2}' 2>/dev/null || exit 1
+                    else
+                        echo "Unknown"
+                    fi
+                    exit 0
+                 ]]>
+            </script>
+            <script action="update" interpreter="bash">
+                <![CDATA[
+                    #
+                    # ROOT: top of branches on repository (by convention, /branches)
+                    # CONTYPE : either svn, http or https
+                    # DST : local directory where this branch should be extraced too
+                    name=`basename ${DST}`
+                    svn upgrade ${DST} 2>/dev/null
+                    if [ "$$name" == "rim.py" ]
+                    then
+                        echo svn update $$SVNUSER $$SVNPASSWORD -q ${OPTIONS} ${DST} || exit 1
+                        svn update $$SVNUSER $$SVNPASSWORD -q ${OPTIONS} ${DST} || exit 1
+                    else
+                        echo svn update -r${REVISION} $$SVNUSER $$SVNPASSWORD -r${REVISION} -q ${OPTIONS} ${DST} || exit 1
+                        svn update -r${REVISION} $$SVNUSER $$SVNPASSWORD -q ${OPTIONS} ${DST} || exit 1
+                    fi
+                    exit 0
+                 ]]>
+            </script>
+            <script action="mkbranch" interpreter="bash">
+                <![CDATA[
+                    #
+                    # PARENT : name of the old branch
+                    # BRANCH : name of the new branch
+                    svn cp -m '${MSG}' ${CONTYPE}://${SERVER}:${PORT}${ROOT}/${PREFIX}${PARENT} ${CONTYPE}://${SERVER}:${PORT}${ROOT}/${PREFIX}${BRANCH} || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="chkbranch" interpreter="bash">
+                <![CDATA[
+                    # Check for the existance of a branch on the repository
+                    # BRANCH : name of the branch
+                    (svn ls ${CONTYPE}://${SERVER}:${PORT}${ROOT} 2>/dev/null| grep -q -w ${PREFIX}${BRANCH}/) || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="chkserver" interpreter="bash">
+                <![CDATA[
+                    # Check for accessibility to that server
+                    # 
+                    (svn info ${CONTYPE}://${SERVER}:${PORT}${ROOT} 2>/dev/null) || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="rmbranch" interpreter="bash">
+                <![CDATA[
+                    # DST: name of the branch to remove on the repository
+                    cmd="svn rm --force -m '${MSG}' ${CONTYPE}://${SERVER}:${PORT}${ROOT}/${PREFIX}${BRANCH} 2>&1"
+                    echo $$cmd
+                    exit 0
+                    error=`$$cmd`
+                    status = $$?
+                    case "$$error" in
+                    '*does not exist*')
+                        # branch missing is ok
+                        status=0
+                    ;;
+                    esac
+                    exit $$status
+                 ]]>
+            </script>
+            <script action="clean" interpreter="bash">
+                <![CDATA[
+                    # FastCopy ONLY
+                    # remove all modifications within a branch
+                    # this is used after a copy of a local branch
+                    svn revert -qR ${DST} || return 1
+                    # remove all untracked files or directories
+                    svn stat --no-ignore ${DST} | awk '/^\?/{print $NF;}' | xargs rm -rf ) || return 1
+                    return 0
+                 ]]>
+            </script>
+            <script action="switch" interpreter="bash">
+                <![CDATA[
+                    # FastCopy ONLY
+                    # switch working copy DST to branch SRC.
+                    # Used after a clean during local 
+                    svn switch -q ${CONTYPE}://${SERVER}:${PORT}${ROOT}${BRANCH}${SRC} ${DST} || exit 1
+                    exit 0
+                 ]]>
+            </script>
+        </scstype>
+        <scstype name="git" subtrees="False">
+            <script action="checkout" interpreter="bash">
+                <![CDATA[
+                    mkdir -p $DST
+                    if [ -d $DST/.git ] 
+                    then
+                        cd $DST
+                        echo "(cd $DST; git pull --all)"
+                        git pull --all
+                    else
+                        echo git clone -b ${BRANCH} ${CONTYPE}://${SERVER}${ROOT}${SRC} ${DST}
+                        git clone -b ${BRANCH} ${CONTYPE}://${SERVER}${ROOT}${SRC} ${DST}
+                    fi
+                    exit $$?
+                 ]]>
+            </script>
+            <script action="update" interpreter="bash">
+                <![CDATA[
+                    cd ${DST}
+                    echo "(cd $DST; git pull --all)"
+                    git pull --all || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="merge" interpreter="bash">
+                <![CDATA[
+                    echo "(cd $DST; git merge --all)"
+                    cd ${DST}
+                    git merge --all || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="mkbranch" interpreter="bash">
+                <![CDATA[
+                    echo gitadm -s ${SERVER} -p ${ROOT} -a ${PREFIX}${BRANCH} ${PARENT} || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="chkbranch" interpreter="bash">
+                <![CDATA[
+                    (gitadm -s ${SERVER} -p ${ROOT} -l | grep -q -w ${PREFIX}${BRANCH}) || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="chkserver" interpreter="bash">
+                <![CDATA[
+                    gitadm -s ${SERVER} -p ${ROOT} -l 2>/dev/null || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="rmbranch" interpreter="bash">
+                <![CDATA[
+                    gitadm -s ${SERVER} -p ${ROOT}/${PREFIX} -d ${BRANCH} || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="clean" interpreter="bash">
+                <![CDATA[
+                    # remove all private (working and committed, put not pushed) modifications
+                    cd ${DST}
+                    git reset -q --hard || exit 1
+                    exit 0
+                 ]]>
+            </script>
+            <script action="switch" interpreter="bash">
+                <![CDATA[
+                    # Switch to a new branch
+                    cd ${DST}
+                    git checkout ${NEWRANCH} || exit 1
+                    exit 0
+                 ]]>
+            </script>
+        </scstype>
+    </scstypes>
+    <repositories>
+        <!-- list of source control servers and their types -->
+        <repo 
+            name="gitroots"
+            server="192.168.0.34"
+            type="git"
+            port="9420"
+            contype="git"
+            root="/exports/rim/roots"
+        />
+        <repo 
+            name="gitools"
+            server="192.168.0.34"
+            type="git"
+            port="9420"
+            contype="git"
+            root="/exports/rim/tools"
+        />
+        <repo 
+            name="svnserver"
+            server="192.168.0.213"
+            port="80"
+            type="subversion"
+            contype="http"
+            root="/svn/branches"
+        />
+        <repo 
+            name="vendor"
+            server="192.168.0.213"
+            port="80"
+            type="subversion"
+            contype="http"
+            root="/svn"
+        />
+        <repo 
+            name="svnssl"
+            server="s2sys.com"
+            port="444"
+            type="subversion"
+            contype="http"
+            root="/svn/branches"
+        />
+    </repositories>
+    <sources>
+        <!-- List the entities that can be managed separately from a branching
+             perspective. -->
+        <scs
+            name="rim"
+            repo="svnserver"
+            prefix="rim_"
+        />
+        <scs
+            name="netbox"
+            repo="svnserver"
+            prefix="v_"
+        />
+        <scs
+            name="vendor"
+            repo="vendor"
+            prefix="vendor"
+        />
+        <scs
+            name="global"
+            repo="svnserver"
+            prefix="global"
+        />
+        <scs
+            name="roots"
+            repo="gitroots"
+            archSpecific="True"
+        />
+        <scs
+            name="tools"
+            repo="gitools"
+        />
+    </sources>
+</scs>

@@ -1,0 +1,43 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          acpid
+# Required-Start:    procps
+# Required-Stop: 
+# Default-Start:     1 3 5 8
+# Default-Stop:      0 6
+# Short-Description: acpid daemon.
+# Description:
+### END INIT INFO
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
+. /lib/lsb/init-functions
+
+ACPID_OPTS="-c /etc/acpi/events -s /var/run/acpid.socket"
+
+case "$1" in
+  start)
+	log_daemon_msg "Starting acpid" "acpid"
+    exec 9>&1
+    exec 1>/dev/null
+	if [ -f /iamacontainer ] || start-stop-daemon --start --quiet -m --pidfile /var/run/acpid.pid --exec  /usr/sbin/acpid -- $ACPID_OPTS; then
+        exec 1>&9
+	    log_end_msg 0
+	else
+        exec 1>&9
+	    log_end_msg 1
+	fi
+	;;
+  stop)
+	log_daemon_msg "Stopping acpid" "acpid"
+	if [ -f /iamacontainer ] || start-stop-daemon --stop --quiet --oknodo --pidfile /var/run/acpid.pid; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+	;;
+  *)
+	echo "Usage: $0 start|stop" >&2
+	exit 3
+	;;
+esac

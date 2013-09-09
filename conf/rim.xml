@@ -1,0 +1,232 @@
+<?xml version='1.0' ?>
+<rim version="2.0">
+    <!--
+        Hardware Model
+    -->
+    <!-- Reference definitions for basic hardware platforms. clmNode csan reference and override defaults of these
+         through the us eof the geo entry -->
+    <geoRef 
+        name="Vmware"   
+        raided="1"
+        disks="sda:sdb:sdc:sdd"     
+        probe="grep -q VMware ${devPath}/device/vendor" 
+        parts="0:5G:2G" 
+        rwcache="1G" 
+        cdrom="sr0"
+        stick="sdc"
+    />
+    <geoRef 
+        name="Vbox"   
+        raided="1"
+        disks="sda:sdb:sdc:sdd"     
+        probe="grep -q VBOX ${devPath}/device/vendor" 
+        parts="0:5G:2G" 
+        rwcache="1G" 
+        cdrom="hda"
+        stick="sdc"
+    />
+    <geoRef 
+        name="XenPvHvm" 
+        raided="1"
+        disks="xvda:xvdb:xvdc:xvdd"  
+        probe="grep -q vbd ${devPath}/device/devtype" 
+        parts="0:5G:2G" 
+        rwcache="1G" 
+        cdrom="sr0"
+        stick="sdc"
+    />
+    <geoRef 
+        name="XenHvm"   
+        disks="sda:sdb:sdc:sdd"     
+        probe="grep -q QEMU ${devPath}/device/model" 
+        parts="0:5G:2G" 
+        rwcache="1G" 
+        cdrom="sr0"
+        stick="sdc"
+    />
+    <geoRef
+        name="Raid"     
+        raided="1" 
+        disks="sda::sdb:"
+        probe="grep -q RMS2AF040 ${devPath}/device/model" 
+        parts="0:5G:2G" 
+        rwcache="1G" 
+        cdrom="sr0"
+        stick="sdc"
+    />
+    <geoRef
+        name="DefaultScsi"     
+        disks="sda:sdb:sdc:sdd"
+        probe="true" 
+        parts="0:5G:2G" 
+        rwcache="1G" 
+        cdrom="sr0"
+        stick="sdc"
+    />
+    <geoRef 
+        name="ArmSsd"   
+        disks="mmcblk0"         
+        probe="grep -q SSD ${devPath}/device/devtype"    
+        parts="16M:1G:512M:" 
+        pprefix="p" 
+        rwcache="100M" 
+    />
+    <clmNode name="Rim64" arch="x86_64">
+        <preloader type="bios" />   
+        <loader type="grub" />
+        <geo refname="Vmware" />
+        <geo refname="XenPvHvm" />
+        <geo refname="XenHvm" />
+        <geo refname="Vbox" />
+        <geo refname="Raid" />
+        <!-- probes that always return true must be listed last !-->
+        <geo refname="DefaultScsi" />
+    </clmNode>
+    <clmNode name="Rim" arch="i386">
+        <preloader type="bios"/>   
+        <loader type="grub"/>
+        <geo refname="Vmware" />
+        <geo refname="DefaultScsi" />
+    </clmNode>
+    <clmNode name="Arm" arch="arm">
+        <preloader type="mlo"/>   
+        <loader type="uboot"/>
+        <geo refname="ArmSsd"/>
+    </clmNode>
+    <clmNode name="Armv5" arch="armv5" karch="arm" >
+        <preloader type="ubl"/>   
+        <loader type="uboot"/>
+        <geo refname="ArmSsd"/>
+    </clmNode>
+    <!--
+        CPUs
+    -->
+    <arch name="i386">
+        <loader type="grub"/>
+    </arch>
+    <arch name="arm">
+        <loader type="uboot"/>
+    </arch>
+    <arch name="armv5">
+        <loader type="uboot"/>
+    </arch>
+    <arch name="x86_64">
+        <loader type="grub"/>
+    </arch>
+    <arch name="sparc">
+        <loader type="OpenBoot"/>
+    </arch>
+    <os name="Solaris">
+    </os>
+    <os name="Linux" fstype="squashfs" >
+        <fsbuild name="squashfs">
+            <![CDATA[
+            rimksquashfs $FS_ROOT $FS_NAME 1>/tmp/mksquashfs.$$ 2>&1 || (
+				echo "Error: while making filesystem."
+				cat /tmp/mksquashfs.$$
+			)
+		    /bin/rm -f /tmp/mksquashfs.$$
+            # uncomment below to debug postmortem the filesystem content.
+            #mv $FS_ROOT $FS_ROOT.saved
+             ]]>
+        </fsbuild>
+        <fsbuild name="ext2">
+            <![CDATA[
+            echo Creating ext2 filesystem from $FS_ROOT into $FS_NAME
+            echo -n "1- estimating size of filesystem..."
+            eMegs="`du -sk $FS_ROOT|awk '{print $1}`"
+            echo "   $eMegs megs."
+            echo -n "2- create filesystem file..."
+            # we use couhnt=0 and seek to make this instantanious
+            dd if=/dev/zero bs=1 count=0 seek=100000 of=/tmp/tst
+            echo "Done."
+            #
+            # todo --  Need sudo here!!..
+            #   mount loopback , 
+            #   run mke2fs on it, 
+            #   tar-untar to it.
+            #   umount loop
+            #   done
+            echo "Done."
+            
+             ]]>
+        </fsbuild>
+        <fsbuild name="cramfs">
+            <![CDATA[
+            echo Creating cramfs filesystem from $FS_ROOT into $FS_NAME
+            mkcramfs $FS_ROOT $FS_NAME 1>/tmp/mkcramfs.$$ 2>&1 || (
+				echo "Error: while making filesystem."
+                echo "----------------------"
+				cat /tmp/mkcramfs.$$
+                echo "----------------------"
+				/bin/rm -f /tmp/mkcrasmfs.$$
+			)
+            exit 0
+             ]]>
+        </fsbuild>
+        <fsbuild name="native">
+            <![CDATA[
+            echo Creating native file tree from $FS_ROOT
+            # this is just a set of binaries produced by building the 
+            # tools for Rim itself (a pre-requisite for other products)
+            #
+            exit 0
+             ]]>
+        </fsbuild>
+    </os>
+    <os name="Vxworks">
+    </os>
+    <distro name="Solaris10" os="Solaris" version="1109">
+        <version name="1109">
+            <osArch name="sparc" tools="Sol_10_sparc"/>
+        </version>
+    </distro>
+    <distro name="Ubuntu" os="Linux">
+        <version name="lts10.04">
+            <osArch name="i386"     tools="Ubuntu_LTS_10.4_i386"/>
+            <osArch name="x86_64"   tools="Ubuntu_LTS_10.4_x86_64"/>
+            <osArch name="arm"      tools="Ubuntu_LTS_10.4_arm"/>
+        </version>
+        <version name="lts12.04">
+            <osArch name="i386"     tools="Ubuntu_LTS_10.4_i386"/>
+            <osArch name="x86_64"   tools="Ubuntu_LTS_10.4_x86_64"/>
+            <osArch name="arm"      tools="Ubuntu_LTS_10.4_arm"/>
+        </version>
+    </distro>
+    <distro name="Fedora" os="Linux">
+        <version name="15">
+            <osArch name="armv5"   tools="Fedora_15_armv5"/>
+        </version>
+    </distro>    
+    <distro name="Wrl" os="Linux">
+        <version name="3.0">
+            <osArch name="i386" tools="Wrl_3.0_i386" />
+        </version>
+    </distro>    
+    <distro name="Suse" os="Linux">
+        <version name="10.1">
+            <osArch name="i386" tools="RhLinux_Intel_3.4.6" target="i686-pc-linux-gnu" />
+        </version>
+    </distro>    
+    <var name="withs" value="--with-pkgversion='Rim1.0'" /> <!-- global pkgversion for the tools -->
+    <toolSet name="Ubuntu_LTS_10.4_i386" osRelease="Ubuntu" arch="i386" version="lts10.4" target="i686-rim-linux-gnu" >
+        <tool name="binutils" version="2.18"  options="${withs}" />
+        <tool name="gcc"      version="4.3.2" options="${withs} --enable-languages=c,c++" />
+    </toolSet>
+    <toolSet name="Ubuntu_LTS_10.4_x86_64" osRelease="Ubuntu" arch="x86_64" version="lts10.4" target="x86_64-rim-linux-gnu" >
+        <tool name="binutils" version="2.18"  options="${withs}" />
+        <tool name="gcc"      version="4.3.2" options="${withs} --enable-languages=c,c++" />
+    </toolSet>
+    <toolSet name="Ubuntu_LTS_10.4_arm" osRelease="Ubuntu" arch="arm" version="lts10.4" target="arm-rim-linux-gnu" >
+        <tool name="binutils" version="2.18"  options="${withs}" />
+        <tool name="gcc"      version="4.3.2" options="${withs} --enable-languages=c,c++" />
+    </toolSet>
+    <toolSet name="Fedora_15_armv5" osRelease="Fedora" arch="armv5" version="15" target="armv5-arm-linux-gnu" >
+        <tool name="binutils" version="2.18"  options="${withs}" />
+        <tool name="gcc"      version="4.3.2" options="${withs} --enable-languages=c,c++" />
+    </toolSet>
+    <toolSet name="Sol_10_sparc" osRelease="Solaris10" arch="sparc" version="1109" target="sparc-sun-solaris2.10" >
+        <tool name="binutils" version="2.18"  options="${withs}" />
+        <tool name="gcc"      version="4.3.2" options="${withs} --enable-languages=c,c++" />
+    </toolSet>
+</rim>

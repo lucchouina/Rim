@@ -1,0 +1,66 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          portmap
+# Required-Start:    network
+# Required-Stop:
+# Default-Start:     5
+# Short-Description: rpcport mapper
+### END INIT INFO
+
+. /lib/lsb/init-functions
+
+PROGRAM=portmap
+PROGPATH=/sbin
+SCRIPT=portmap
+PIDFILE=/var/run/$PROGRAM.pid
+DESCRIPTION="Port mapper"
+
+start_it()
+{
+	if [ -f /etc/default/$PROGRAM ]; then
+		. /etc/default/$PROGRAM
+	elif [ -f /etc/$PROGRAM.conf ]; then
+		. /etc/$PROGRAM.conf
+	fi
+	log_daemon_msg "Starting $DESCRIPTION" "$PROGRAM"
+	if start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $PROGPATH/$PROGRAM -- $OPTIONS; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+}
+
+stop_it()
+{
+	log_daemon_msg "Stopping $DESCRIPTION" "$PROGRAM"
+	if start-stop-daemon --stop --quiet --pidfile $PIDFILE; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+}
+
+export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
+
+case "$1" in
+  start)
+    start_it
+    ;;
+  stop)
+    stop_it
+	;;
+  restart)
+	stop_it
+    start_it
+	;;
+
+  status)
+	status_of_proc -p $PIDFILE $PROGPATH/$PROGRAM $PROGRAM && exit 0 || exit $?
+	;;
+
+  *)
+	log_action_msg "Usage: /etc/init.d/$SCRIPT {start|stop|restart|status}"
+	exit 1
+esac
+
+exit 0

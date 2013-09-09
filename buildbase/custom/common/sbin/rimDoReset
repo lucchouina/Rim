@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# rimDoReset - reset current version to initial state
+# 
+. /sbin/rimFuncs
+setNodeEnvironment
+
+# let the post op functiosn know this is a reset (in case they care)
+reset=1
+
+rm -f /dopost
+postinstall
+
+# recover the config portition we keep accross this operation
+# (note: reset.cfg is created by rimReset)
+cat /etc/reset.cfg | setSystemInfo -n -f > /dev/null
+hostname `cat /etc/hostname` 2>/dev/null
+mv /etc/reset.cfg /etc/reset.cfg.saved
+

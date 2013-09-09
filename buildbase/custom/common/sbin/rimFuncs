@@ -1,0 +1,310 @@
+#! /bin/bash
+# basic functions for Rim shell environment
+#
+
+###############################
+# cheap exception mechanism
+PIVOT=pivot
+rimPubSoft="soft"
+rimPivot="pivot"
+rimPubData="data"
+
+function exitFunc
+{
+    echo "$lastGasp"
+    [ "#log" ] && (
+        echo "-------- Last Error Output----------"
+        echo "$log"
+        echo "------------------------------------"
+    )
+    exit 1
+}
+
+function abort
+{
+    lastGasp="$*"
+    kill -USR1 $$
+    sleep 1
+    # Not Reached
+}
+
+trap exitFunc SIGUSR1
+
+function capture # cmd arguments ...
+{
+    log="[$*]\n"
+    log="$log""`$* 2>&1`" || return 1
+    return 0
+}
+
+###################################################################################
+# Some of the function shared by the host based install and the target install
+# i.e. install boot media versus single media (sd cards) which needs to be prepared 
+# from the build host.
+#
+
+#
+# basic module install function
+# Expects: $rim_variant to be set and bom.sh to have been sourced.
+#
+function installModules() # <rootDir>
+{
+    vDir=$1
+    #
+    # Now go through the list of modules and copy them over.
+    # We shoudl really diff the md5 
+    echo -n "Installing support scripts..."
+    cp ./bom.xml $vDir
+    cp ./rimFuncs $vDir
+    cp ./bom.sh $vDir
+    cp ./mountVersion $vDir
+    cp ./unMountVersion $vDir
+    echo "Done."
+    echo -n "Installing kernel..."
+    cp ./kernel_$rim_variant $vDir/kernel
+    echo "Done."
+    echo "Installing modules for $rim_node:"
+    eval $rim_node
+    echo -n "Copying modules..."
+    cp *.fs $vDir
+    echo "done."
+    echo -n "Copying kernels..."
+    cp initrd-* $vDir
+    echo "done."
+    echo -n "Copying initrds..."
+    cp kernel_* $vDir
+    echo "done."
+    echo -n "Creating links for node $rim_node..."
+    modIndex=0
+    while true
+    do
+        if [ "${module[$modIndex]}" ]
+        then
+            echo "    ${module[$modIndex]}"
+            rm -f $vDir/${module[$modIndex]}.fs
+            ln -s ${module[$modIndex]}*_$rim_variant.fs $vDir/${module[$modIndex]}.fs 
+        else
+            break
+        fi
+        modIndex=$(($modIndex+1))
+    done
+    echo "done."
+    echo rim_node=$rim_node > $vDir/personality
+    echo rim_variant=$rim_variant >> $vDir/personality
+    echo "Done installing modules for $rim_node."
+}
+
+#
+# Create RW jail for new version
+#
+function createRwCache() # <rootDir>
+{
+    vDir=$1
+    echo -n "    Creating cache..."
+    dd if=/dev/zero bs=10240 seek=100000 count=1 of=$vDir/rwjail.fs 1>/dev/null 2>&1
+    echo "Done."
+    echo -n "    Creating loop device..."
+    LODEV=`losetup -f`
+    losetup $LODEV $vDir/rwjail.fs 1>/dev/null 2>&1 
+    echo "Done."
+    echo -n "    Building cache filesystem..."
+    mkfs -t ext3 $LODEV 1>/dev/null 2>&1
+    losetup -d $LODEV 
+    echo "Done."
+}
+#
+# Ask the use to make a selection of node personality
+#
+function getNodeName()
+{
+    PS3="Please enter the node personality for this install [Q to abort]: " 
+    select ANS in ${nodeNames[*]}; do 
+      case $REPLY in 
+        [1-9]) 
+          rim_node=${nodeNames[$((REPLY - 1))]} 
+          return
+          ;; 
+
+        [qQ]*) 
+          abort "Scratch install cancelled." 
+          exit 1
+          ;; 
+
+        *) 
+          ;; 
+      esac 
+    done
+}
+#
+#
+function setNodeName()
+{
+    #
+    # if we cannot figure out the node and its variant we need to ask
+    #
+    if [ ! "$rim_node" ]
+    then
+        if [ $numNodes -lt 2 ]
+        then
+            rim_node=${nodeNames[0]}
+        else
+            getNodeName
+        fi
+    fi
+}
+
+function C_mkBootable() # <device> <map#>
+{
+    echo "Setting up device $1 for grub based boot."
+    (
+        echo "device (hd$2) /dev/$1"
+        echo "root (hd$2,0)"
+        echo "setup (hd$2)"
+        echo "quit"
+    ) | grub --batch || abort "Could not make $1 bootable"
+}
+
+function mkBootable() # <device> <map#>
+{
+    capture C_mkBootable $1 $2 || abort "Could not make $1 bootable"
+}
+
+
+function grubUpdate() # <default_version>
+{
+    ./rimboot -b $1
+}
+
+function partitionDrive() # [block device name in /sys/block] [isRaid]
+{
+    [ "$1" ] || echo "usage: partitionDrive <device name> <isRaid>",return
+    [ "$2" ] || echo "usage: partitionDrive <device name> <isRaid>",return
+
+    fsType=fd
+    [ "$2" == 0 ] && fsType=83
+    
+    vendor=`cat /sys/block/$1/device/vendor 2>/dev/null`
+    vendor=`echo $vendor`
+    model=`cat /sys/block/$1/device/model 2>/dev/null`
+    model=`echo $model`
+    kbytes=`sfdisk -s /dev/$1`
+    #
+    # the final bom file function defined the partition sizes
+    #
+    raw=${partSizes[0]}
+    # if we have no bom.sh context - assume the partitionaing has already been 
+    # done.
+    [ "$raw" ] || return
+    soft=${partSizes[1]}
+    swap=${partSizes[2]}
+    data=${partSizes[3]}
+    [ "$data" ] || data=0
+    ngig=$((kbytes/1024/1024))
+    
+    echo "Found $ngig gig ($kbytes kbytes) Vendor $vendor, Model $model"
+    
+    # calculate space free at end of media
+    rest=$(($kbytes-$soft-$swap-$data-$raw))
+    
+    # soft
+    o1=$(($raw))
+    s1=$(($soft))
+    p1cmd="$o1 $s1 $fsType *\n"
+
+    # swap
+    o2=$(($raw+$soft))
+    s2=$(($swap))
+    p2cmd="$o2 $s2 $fsType\n"
+    
+    o3=$(($raw+$soft+$swap))
+    if [ "$data" == "0" ]
+    then
+        data=$rest
+        s3=$rest
+        rest=0
+    else
+        s3=$(($data))
+        o4=$(($raw+$soft+$swap+$data))
+        s4=$(($rest))
+        p4cmd="$o4 $s4 83\n0 0 0;\n"
+    fi
+    p3cmd="$o3 $s3 $fsType\n"
+    g0=${raw}K
+    g1=$(($soft/1024))M
+    g2=$(($swap/1024))M
+    g3=$(($data/1024))M
+    g4=$(($rest/1024))M
+    sfinput="$p1cmd$p2cmd$p3cmd$p4cmd"
+    echo -n "Partitioning disk $1 - $g0/$g1/$g2/$g3/$g4 ${rimPartUnits} (raw/soft/swap/data/user) ..."
+    echo -e "$sfinput" | capture sfdisk --force -uB /dev/$1
+    echo "Done"
+}
+
+################################
+# Cleanup utility functions
+#
+moveCoreFiles()
+{
+    [ -d corefiles ] || mkdir -p corefiles
+    for coreFile in core core.*
+    do
+        if [ -f $coreFile ]
+        then
+            mv $coreFile corefiles/$coreFile.`date "+%y%m%d_%H%M%S"`
+            echo "Moved $coreFile"
+        fi
+    done
+    #
+    # only keep the last 10 corefiles
+    nCores=`ls corefiles/core* 2>/dev/null | wc -l`
+    if [ $nCores -gt 10 ]
+    then
+        ls -rt corefiles/core* 2>/dev/null | awk '{if(n<nRemove){printf("rm -f %s\n",$1); n++;}}' nRemove=$(($nCores-10)) | bash
+    fi
+}
+
+getBootOptions()
+{
+    for cmd in `cat /proc/cmdline`; do eval $cmd 2>/dev/null; done
+}
+
+setNodeEarlyEnvironment()
+{
+    getBootOptions
+    [ -f /sbin/vars.rim.sh ] && . /sbin/vars.rim.sh
+    [ -f ./vars.rim.sh ] && . ./vars.rim.sh
+    ${rim_node}Vars
+    geoprobe
+}
+
+setNodeEnvironment()
+{
+    getBootOptions
+    if [ -f bom.sh ]
+    then
+        . ./bom.sh
+        $rim_node
+        setvars 1>/dev/null
+        setNodeName
+    elif [ -d /soft/$version ]
+    then
+        pushd /soft/$version 1>/dev/null
+        . ./bom.sh
+        $rim_node
+        setvars 1>/dev/null
+        setNodeName
+        popd 1>/dev/null
+    else
+        setNodeEarlyEnvironment
+        ${rim_node}Vars
+    fi
+}
+
+# run a specific action out of the bom.sh
+# postinstall, lxcstart etc...
+rimRunAction()
+{
+    args="$*"
+    setNodeEnvironment
+    $args
+}

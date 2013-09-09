@@ -1,0 +1,232 @@
+#!/bin/bash
+
+# interval between changes to the led
+# 
+sleepTime=0.25
+
+function ledBleuRed()
+{
+    # buzz for a little while
+    stty 19200 < /dev/ttyS1
+    echo -n A > /dev/ttyS1
+    sleep 0.5
+    echo -n @ > /dev/ttyS1 
+
+    # and start fliping led from red to blue 
+    while true
+    do
+        echo -n D > /dev/ttyS1
+        sleep $sleepTime
+        [ -f /tmp/done ] && return
+        echo -n B > /dev/ttyS1
+        sleep $sleepTime
+        [ -f /tmp/done ] && return
+    done
+        
+}
+
+#
+# wait for stick to be removed and return
+#
+function ledBleuBleuRed()
+{
+    echo -n A > /dev/ttyS1
+    sleep $sleepTime
+    echo -n @ > /dev/ttyS1 
+
+    # and start fliping led from red to blue 
+    while true
+    do
+        echo -n D > /dev/ttyS1
+        sleep $sleepTime
+        echo -n H > /dev/ttyS1
+        sleep $sleepTime
+        echo -n D > /dev/ttyS1
+        sleep $sleepTime
+        echo -n H > /dev/ttyS1
+        sleep $sleepTime
+        echo -n D > /dev/ttyS1
+        sleep $sleepTime
+        echo -n H > /dev/ttyS1
+        sleep $sleepTime
+        echo -n B > /dev/ttyS1
+        sleep $sleepTime
+    done
+}
+
+function ipmiIdentify()
+{
+     while true
+     do
+        ipmitool chassis identify 255 2>/dev/null 1>&2
+        sleep 255
+     done
+}
+
+function scratchIt()
+{
+    #
+    # dhcp/nfs installs (in the cloud)?
+    nfs="$1"
+    #
+    # Let rimFunc's function figure out what devices are what
+    # based on the current dedected platform type.
+    #
+    if [ "$sanboard" ]
+    then
+        (ledBleuRed) &
+    fi
+    #
+    # If we get here, answer was yes
+    #
+    #
+    # attempt to mount installation media FIRST - if we can't, don't wipe the disks!
+    #
+    MOUNTED=false
+    ejectCmd=""
+    mkdir -p /tmp/cd
+    if [ "$nfs" ]
+    then
+        # in /proc/net/pnp, when ip=dhcp and imgd is listening
+        #PROTO: DHCP
+        #nameserver 8.8.8.8
+        #bootserver 192.168.18.101
+        cat /proc/net/pnp
+        nfsserver="`grep bootserver /proc/net/pnp | awk '{print $2;}'`"
+        if [ "$nfsserver" ]
+        then
+            # some times (e.g. Intel BIOS pxe boot)
+            # so the rimiso iso handler adds a server= option to the kernel 
+            # in case
+            devName=nfs
+            [ $nfsserver == "0.0.0.0" ] && nfsserver=$server
+            mount -o nolock,ro $nfsserver:$mount /tmp/cd && MOUNTED=true
+        else
+            # fall back to below sd? device search
+            nfs=""
+        fi
+    fi
+    if [ ! "$nfs" ]
+    then
+        for devName in sr1 sr0 sde sdd sdc sdb sda 
+        do
+            removable="`cat /sys/block/$devName/removable 2>/dev/null`"
+            if [ "$removable" == 1 ]
+            then
+                ejectCmd="/usr/bin/eject /dev/$devName"
+                for part in "" 1
+                do
+                    mount -o ro /dev/$devName$part /tmp/cd && MOUNTED=true && break;
+                done
+            fi
+            [ $MOUNTED == true ] && break;
+        done
+    fi
+    
+    # abort if nothing could be mounted
+    #
+    if [ $MOUNTED = "false" ]; then
+       echo "Can't find or can't mount installation media."
+       cat /tmp/mount_attempts.log
+       bash
+    fi
+    #
+    # Zap both drives partition tables so that setUpDisk and rebuildRaid
+    #  will rebuild everything and make a complete mirror
+    #
+    echo -n "Reinitializing disk(s) :  $diskNames ... "
+    if [ ! "$raided" ]
+    then
+        for d in 1 2 3 4 5 6 7 8 9
+        do 
+            mdadm -S /dev/md$d 2>/dev/null 1>&2
+        done
+    fi
+    for disk in "$diskNames"
+    do
+        if [ $disk != $devName ]
+        then
+            if ! dd if=/dev/zero of=/dev/${disk} count=100 2>/tmp/wipe.log 1>&2; then
+                echo "Problem wiping disk A."
+                cat /tmp/wipe.log
+                return 1
+            fi
+        fi
+    done
+    echo "Done."
+    
+    # make sure we skip usb stick from our normal list
+    finalDisks=""
+    for disk in ${diskNames[*]}
+    do
+        if [ $disk != $devName ]
+        then
+            finalDisks="$finalDisks $disk"
+        fi
+    done
+    
+    #
+    # Perform the actual disk setup
+    #
+    (cd /sbin && ./setUpDisk "$finalDisks" "${partSizes[*]}" scratch)
+    #
+    # And finally, the installation itself
+    #
+    cd /tmp/cd
+    ./installRim
+    umount /tmp/cd >/dev/null 2>&1
+    umount -f /tmp/stick >/dev/null 2>&1
+    #
+    # go to / to free up installation media mount
+    #
+    cd /
+    if [ $devName == nfs ]
+    then
+        umount /tmp/cd
+    else
+        #
+        # check if this is a usb device and zap the eject command
+        #
+        [ "`udevadm info -q path -n $devName 2>/dev/null | grep usb`" ] && ejectCmd=""
+        #
+        # Depending on type of media i.e. cd vs usb stick, either
+        # eject or wait for someone to pull the stick
+        #
+        if [ "$ejectCmd" ]
+        then
+            echo -n "Ejecting CD media..."
+            $ejectCmd
+            echo "Done."
+        else
+            if [ "$sanboard" ]
+            then
+                touch /tmp/done
+                sleep 1
+                (ledBleuBlueRed) &
+            else
+                (ipmiIdentify) &
+            fi
+            echo "Scratch install done."
+            count=0
+            while [ -b /dev/$devName ]
+            do
+                # display this banner each minute we're sitting here
+                if [ $(($count%60)) == 0 ]
+                then
+                    echo -e "\007"
+                    echo "##########################################################################"
+                    echo "#      Please remove the installation media                              #"
+                    echo "##########################################################################"
+                fi
+                count=$(($count+1))
+                echo -n "."
+                sleep 1
+            done
+        fi
+    fi
+    echo -e "\007"
+    echo "Rebooting in 10 seconds!"
+    sleep 10
+    reboot -f
+}
+

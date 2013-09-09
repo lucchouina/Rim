@@ -1,0 +1,11 @@
+#!/bin/bash
+
+#
+# Description:      This is a Rim specific version.
+# it combined the ifup and dhcp hooks together in order to enable ipv4ll
+# and have an external sewtting control its enablement or disablement.
+#
+
+[ "$IFACE" != "lo" ] || exit 0
+/usr/sbin/avahi-autoipd --kill $IFACE 2>/dev/null
+exit 0

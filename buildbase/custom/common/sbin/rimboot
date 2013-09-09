@@ -1,0 +1,282 @@
+#!/bin/bash
+#
+# Script to handle the boot table (in this case grub)
+#
+
+myDir=`dirname $0`
+. $myDir/rimFuncs
+[ "$myDir" ] || mydir="."
+setNodeEnvironment
+
+if [ `id -u` != 0 ]
+then
+    echo "You must be root to run this command."
+    exit 1
+fi
+
+#
+# get original kernel boot command line and extract "version" and "rim_node"
+setNodeEnvironment
+
+# Record current running build 
+curversion=$version
+
+# take a version string usable as an index
+function indexOf() # version tag
+{
+    vIdx=0;
+    for vTag in ${vList[*]}
+    do
+        vIdx=$(($vIdx+1))
+        if [ $vTag == "$1" ]
+        then
+            echo $vIdx
+            return 
+        fi
+    done
+    (
+        echo "Version $1 not found on disk. Available version are:"
+        listVersions
+    ) 1>&2
+    exit 1
+}
+
+#
+# Get list of version into array
+#
+function getVersionList()
+{
+    diskList=(`(cd /${rimPubSoft} && /bin/ls -dLt */personality | grep -v old | awk '{print substr($1,1,length($1)-12)}') 2>/dev/null`)
+    nVer=0
+    curIdx=0
+    vList=()
+
+    # make a numbered list
+    for vtag in ${diskList[*]}
+    do
+        nVer=$((nVer+1))
+        vList[$nVer]=$vtag
+        [ $vtag == "$curversion" ] && curIdx=$nVer
+    done
+
+    # check if we have a current version
+    if [ "$curIdx" == 0 ]
+    then
+        if [ $nVer == 0 ]
+        then
+            echo "No versions found."
+            exit 1
+        else
+            curIdx=1
+        fi
+    fi
+    return 0
+}
+
+#
+# Sync up the boot table with what's on disk
+#
+#
+getVersionList
+
+function putRimGrub() # <version>
+{
+    [ -d /${rimPubSoft}/$1 ] || abort "Version $1 does not exists"
+    if [ "$RIM_DEV" ]
+    then
+        nfsoptions=" repo=192.168.28.49:/tftpboot/$1 "
+    fi
+    echo "#"
+    echo "# --- Index $2"
+    echo "#"
+    echo "title     Version $1"
+    echo "root      (hd${hdb},0)"
+    echo "kernel    /$1/kernel version=$1 $console rim_node=$rim_node rim_variant=$rim_variant $rimoptions$nfsoptions "
+    echo "initrd    /$1/initrd.fs"
+    echo
+}
+
+function isVm()
+{
+    if [ $PLATFORM = Vbox -o $PLATFORM = Vmware -o $PLATFORM = XenPvHvm -o $PLATFORM = XenHvm ]
+    then
+        return 0
+    fi
+    return 1
+}
+
+function syncUp() # [version]
+{
+    # start new boot menu file
+    baud=115200
+    unit=0
+    
+    con2="console=tty"
+    con1="console=ttyS${unit},${baud}n8" 
+    
+    # For certain box we want to have the serial as the primary boot device
+    isVm && conx=$con1 && con1=$con2 && con2=$conx 
+    
+    
+    console="$con1 $con2"
+    rimoptions="init=/init root=/dev/ram quiet rw"
+    rimoptions="$rimoptions"
+    #
+    # Setup ipmi watchdog options for real hardware
+    #
+    isVm || rimoptions="$rimoptions crashkernel=128M"
+    current=$1
+    [ "$rim_node" ] || abort "Node type is not specified"
+    [ "$rim_variant" ] || abort "Variant type is not specified"
+    #
+    # we produce 2 menu files. One for the diskA (hd0 == first drive on the controler)
+    # second one for diskB as primary (hd0 == second drive on the controler)
+    # This enables us to boot from either drives on demand.
+    #
+    for disk in A B
+    do 
+        (
+            if [ $disk = A ]
+            then
+                hda=0
+                hdb=1
+            else
+                hda=1
+                hdb=0
+            fi
+            # prolog
+            echo "#"
+            echo "# GNU Grub configuration"
+            echo "# This file is generated and update by Rim install process."
+            echo "#"
+            echo "serial --unit=$unit --speed=$baud"
+            echo "terminal --timeout=5 console serial"
+            echo
+            echo "default         "$((curIdx-1))
+            echo "timeout         5"
+            echo
+            #
+            # go through the list of version in /${rimPubSoft}
+            vIdx=0
+            for vTag in ${vList[*]}
+            do
+                putRimGrub $vTag $vIdx
+                vIdx=$(($vIdx+1))
+            done
+        ) 1>/tmp/grub.update.disk$disk
+    done
+    
+    # copy this to all possible locations
+    cp /tmp/grub.update.diskB /${rimPubSoft}/grub/menu.lst 2>/dev/null
+    
+    #
+    # !!!!!! This is special responce the rollback script expect(1)s
+    # The expect script is rally looking for 'updated succesfully'
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    echo "Boot version updated succesfully."
+    return 0
+}
+
+# called by installRim to set a new version as boot default
+function setBootVersion() # <versionTag>
+{
+    # check if that version exists
+    curIdx=`indexOf $1`
+}
+
+# clean up time
+function cleanUp() # <number> , keep that many versions max
+{
+    # there is really nothing to do if there is a single version
+    [ $nVer == 1 ] && return 0
+
+    nKeep=$1
+    [ $nVer -le $nKeep ] && nKeep=$nVer
+    nRemove=$(($nVer-$nKeep))
+    
+    # check that the keep version incl. current
+    [ $curIdx -ge $nKeep ] && nRemove=$(($nRemove+1))
+    
+    idx=$(($nVer-$nRemove+1))
+    while [ $idx -le $nVer ]
+    do
+        if [ $idx != $curIdx ]
+        then
+            # if it is the current version then move it only
+            if [ "$curversion" != ${vList[$idx]} ]
+            then
+                # remove that thing
+                echo -n "Removing version ${vList[$idx]}..."
+                /bin/rm -rf /${rimPubSoft}/${vList[$idx]}
+                /bin/rm -rf /${rimPubData}/${vList[$idx]}
+                echo "Done."
+            fi
+        fi
+        idx=$((idx+1))
+    done
+}
+
+function listVersions()
+{
+    echo "List of installed version(s) :"
+    idx=1
+    while [ $idx -le $nVer ]
+    do
+        [ -d /${rimPubSoft}/${vList[$idx]} ] && iDate=`stat -c%y /${rimPubSoft}/${vList[$idx]}` || iDate=""
+        echo "$idx - ${vList[$idx]} - [$iDate]"
+        idx=$(($idx+1))
+    done 
+}
+
+usage()
+{
+  echo USAGE
+  echo "  `basename $0` [-s] | [-b <version>] | [-c <#> | [-l]"
+  echo
+  echo OPTIONS
+  echo "    -d               ; downgrade to previous version"
+  echo "    -s               ; sync uup the install directory with the boot table"
+  echo "    -b  [version]    : set the default boot to this version"
+  echo "    -c  [#]          : cleanup keeping # number of versions"
+  echo "    -l               : list all versions on the box"
+  echo
+
+  exit 0
+}
+
+downgrade()
+{
+    getVersionList
+    curIdx=`grep "^default" /${rimPubSoft}/grub/menu.lst  | awk '{print $NF}'`
+    curIdx=$((curIdx+1))
+    prevVersion=${vList[$((curIdx+1))]}
+    if [ "$prevVersion" ]
+    then
+        setBootVersion $prevVersion 
+        syncUp
+        exit 0
+    else
+        echo "No previous version available."
+        exit 1
+    fi
+}
+
+#
+#
+# Main 
+while getopts "sb:c:ln:v:d" option
+do
+  case $option in
+   s ) syncUp ;;
+   d ) downgrade ;;
+   b ) setBootVersion $OPTARG && syncUp;;
+   n ) rim_node=$OPTARG;;
+   v ) rim_variant=$OPTARG;;
+   c ) cleanUp $OPTARG && getVersionList && syncUp;;
+   l ) listVersions ;;
+   * ) usage ;;
+  esac
+done
+shift $(($OPTIND - 1))
+[ "$OPTIND" == 1 -a ! "$1" ] && usage
+exit 0

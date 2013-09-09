@@ -1,0 +1,10 @@
+# these are the virtual filesystems which will be mounted
+# by the mountall.con -> mountall upstart sequence.
+#
+# All "real" filesystems are mounted by the /init scripts accoring to
+# to RIm bringup mechanisms.
+#
+# The udev filesystem will be loaded during udev startup
+#
+proc /proc proc rw,relatime 0 0
+sysfs /sys sysfs rw,relatime 0 0

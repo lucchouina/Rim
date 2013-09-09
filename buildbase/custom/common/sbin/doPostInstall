@@ -1,0 +1,8 @@
+#! /bin/bash
+cd /soft/$1
+. rimFuncs
+setNodeEnvironment
+export rimPrivSoft=${rimPrivSoft}
+export rimPrivData=${rimPrivData}
+export rimPubData=${rimPubData}
+postinstall

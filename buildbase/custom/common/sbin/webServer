@@ -1,0 +1,640 @@
+#!/usr/bin/env python
+#
+import cgi
+import copy
+import time
+import urllib
+import simplejson as json
+import sys,os
+import rim
+
+from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+import Cookie
+from settings.system import *
+from settings.utils import *
+from settings.handlers import system,ipinfo
+
+# port used at various run levels
+if len(sys.argv) < 1:
+    print "usage: webServer <port#>"
+    sys.exit(1)
+
+debug=False
+for arg in sys.argv[1:]:
+    if arg == '-d':
+        debug=True
+    else:
+        try:
+            port=int(arg)
+        except:
+            print "usage: webServer [-d] <port#>"
+            sys.exit(1)
+
+style="""
+<style type="text/css">
+.title 
+{
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	color: rgb(0,0,0);
+	font-size: 12px;
+	font-weight: bold;
+	letter-spacing: 0px;
+}
+
+.legend 
+{
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	color: rgb(0,0,200);
+	font-size: 12px;
+	font-weight: bold;
+	letter-spacing: 0px;
+}
+
+.error 
+{
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	color: red;
+	font-size: 12px;
+	font-weight: bold;
+	letter-spacing: 0px;
+    border-color: red;
+}
+.noerror 
+{
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	color: black;
+	font-size: 12px;
+	font-weight: bold;
+	letter-spacing: 0px;
+    border-color: black;
+}
+
+.title_note {
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	color: gray;
+	font-size: 10px;
+	font-weight: normal;
+	font-decoration: italics;
+	letter-spacing: 0px;
+}
+.tt {font-family: Verdana, Arial, Helvetica; font-size: 10px; color: rgb(0,0,0); vertical-align: top}
+
+table,tr,td { border-collapse:collapse; border: none; }
+fieldset {margin-bottom: 0.7em;}
+table { width: 80%; }
+td.title { width:15em; text-align:right }
+td.value { text-align:left }
+td.theading { width: 500%; }
+h2 { 
+    font-size: 20px; 
+    width:50%; 
+    text-align:left; 
+    margin-left: 10;
+    margin-bottom: -.1em;
+    backgroup-color: white;
+}
+</style>
+"""
+
+LOGO_FILE="/etc/productlogo.png"
+LXC_FILE="/etc/lxc.png"
+LOG_FILE="/var/log/initmode"
+LOADING_GIF="/etc/loading.gif"
+
+def debugLog(s):
+    print "%s" % s
+
+if debug:
+    log=debugLog
+else:
+    log=rim.logger("webServer").log
+
+initMode=system.isInitmode(system.get())
+
+def closeFd(fd):
+    try:
+        os.fdopen(fd).close()
+    except:
+        pass
+
+global handlers, interests, root, schema, initvalues
+handlers, interests, root, schema = get_systeminfo([])
+# read in the current values
+initvalues=copy.deepcopy(root)
+
+class handlerClass(BaseHTTPRequestHandler):
+
+    def __init__(self, request, client_address, this):
+        self.errors={}
+        self.log=log
+        self.user = None
+        self.suberrors={}
+        if not debug : 
+            sys.stdout = open(LOG_FILE, 'a', 0)
+            sys.stderr = sys.stdout
+        global handlers, interests, root, schema, initvalues
+        self.handlers=handlers
+        self.root=root
+        self.interests=interests
+        self.schema=schema
+        
+        if self.root['System']['EnableInitmode']:
+            self.curMode='initmode'
+        else:
+            self.curMode='appmode'
+
+        log('New Connection from Client: %s' % str(client_address))
+        
+        # check that we do have a job to do here
+        if not self.modeChildren(self.schema['mapping']):
+            log("Nothing to do in mode '%s' - exiting" % self.curmode)
+            sys.exit(0)
+            
+        if debug > 2:
+           log("=============================================================")
+           log("Initial values are:")
+           log("=============================================================")
+           log(initvalues)
+           log("=============================================================")
+           log("Schema is:")
+           log("=============================================================")
+           log(self.schema)
+           log("=============================================================")
+        self.logoHeight=55
+        BaseHTTPRequestHandler.__init__(self, request, client_address, this)
+        
+    #
+    # cookie mgmt
+    #
+    def setUser(self):
+        cookies = self.headers.get('Cookie')
+        if cookies:
+            morsel = Cookie.BaseCookie(cookies).get('user')
+            if morsel:
+                self.user = morsel.value
+    #
+    # scan through the schema branch to see if any child 
+    # is flagged for initmode
+    #
+    def modeChildren(self, mappings, level=0):
+        for mapping in mappings:
+            if isinstance(mappings, dict):
+                mapping=mappings[mapping]
+            if mapping.has_key(self.curMode):
+                if mapping[self.curMode]:
+                    return True
+            if mapping['type'] == 'map':
+                if self.modeChildren(mapping['mapping'], level+1):
+                    return True
+            if mapping['type'] == 'seq':
+                if self.modeChildren(mapping['sequence'], level+1):
+                    return True
+        return False
+    #
+    # scan children for errors
+    def anyChildErrors(self, errors):
+        for key in errors:
+            if isinstance(errors[key], str) :
+                if len(errors[key]):
+                    log("---------------------- errors[%s]='%s' -----------" % (key, errors[key]))
+                    return True
+            else:
+                return self.anyChildErrors(errors[key])
+        return False
+    
+    #
+    # Render one element of the page
+    #
+    def render_element(self, mapping, gkey, values, errors, idstr, title):
+        if not mapping.has_key(self.curMode) or not mapping[self.curMode]: 
+            return;
+        self.wfile.write("<tr>\n")
+        required=" "
+        if ( mapping.has_key('required') and mapping['required']==True ) and mapping['type'] != 'bool':
+            required="*"
+        self.wfile.write("""
+            <td class="title">
+                %s %s:
+            </td>\n""" % (title, required))
+        self.wfile.write("""
+            <td class="value">
+        """);
+        if mapping['type'] == 'str' :
+            if mapping.has_key('enum'):
+                self.wfile.write('<select id="%s" name="%s">' % (gkey, idstr))
+                self.wfile.write('<option selected value="%s">%s</option>' % (values[gkey],values[gkey]))
+                for val in mapping['enum']:
+                    self.wfile.write('<option value="%s">%s</option>\n' % (val, val))
+                self.wfile.write('</select>')
+            elif mapping.has_key('subtype') and mapping['subtype'] == 'url':
+                text, url = values[gkey].split('|')
+                self.wfile.write('<a href="%s">%s</a>' % (url, text))
+            else:
+                self.wfile.write('<input type="text" value="%s" id="%s" name="%s" size=20 maxlength=20>' % (values[gkey], gkey, idstr))
+        elif mapping['type'] == 'int' :
+            self.wfile.write('<input type="number" value="%s" id="%s" name="%s" size=6 maxlength=6 />' % (values[gkey], gkey, idstr))
+        elif mapping['type'] == 'bool' :
+            if values[gkey]:
+                vstr='checked=checked"'
+            else:
+                vstr=""
+            self.wfile.write('<input type="checkbox" id="%s" name="%s" %s>' % (gkey, idstr, vstr))
+        self.wfile.write("</td>\n")
+        if isinstance(errors, dict) and errors.has_key(gkey):
+            error=errors[gkey]
+        else:
+            error=""
+        self.wfile.write("""
+                <td class="error">
+            """);
+        self.wfile.write("%s\n" % error)
+        self.wfile.write("</td>\n")
+        self.wfile.write("</tr>\n")
+    #
+    # handle an entire group of elelments
+    #
+    def render_group(self, group, values, errors, title, key="", level=0, note="", idstr=""):
+        if not self.modeChildren(group, level): return
+        fclass='class="noerror"'
+        if isinstance(errors, str) and len(errors):
+            fclass='class="error"'
+            title="%s (%s)" % (title, errors)
+        elif self.anyChildErrors(errors):
+            fclass='class="error"'
+        self.wfile.write('<fieldset %s><legend>%s</legend>\n' % (fclass, title))
+        self.wfile.write('<table cellborder="0">\n')
+        if len(note):
+            self.wfile.write('<tr><td class="title_note" colspan="4">\n')
+            self.wfile.write("%s" % note)
+            self.wfile.write("</td></tr>\n")
+        for order in range(1, len(group)+1)+[ -1 ]:
+            for gkey in group:
+                mapping=group[gkey]
+                if mapping.has_key('order') and int(mapping['order']) != order: 
+                    continue;
+                if order > 0 and not mapping.has_key('order'): 
+                    continue;
+                idkey="%s:%s" % (idstr, gkey)
+                if mapping['type'] == 'map' or mapping['type'] == 'seq':
+                    if mapping['type'] == 'seq': 
+                        # we need to cycle through the array here
+                        mapping=mapping['sequence'][0]
+                        # insert a 'add' button
+                        self.wfile.write('<input type="submit" name="%s" value="+" class="button"> Add to %s\n' % (idkey, gkey))
+                        if mapping['type']=='map':
+                            for index in range(0, len(values[gkey])):
+                                idelem="%s:%d" % (idkey,index)
+                                self.wfile.write('<tr><td>')
+                                errIdx="%s%d" % (group, index)
+                                if not errors.has_key(errIdx): errors[errIdx]={}
+                                self.render_group(
+                                    mapping['mapping'], 
+                                    values[gkey][index], errors[errIdx], 
+                                    '%s-%d <input type="submit" name="%s" value="-" class="button">' % (mapping['title'], index, idelem), 
+                                    key=gkey, 
+                                    level=level+1, 
+                                    note="", 
+                                    idstr=idelem)
+                                self.wfile.write("</td></tr>\n")
+                        else:
+                            self.wfile.write("<tr><td>\n")
+                            self.wfile.write('<fieldset %s><legend>%s</legend>\n' % (fclass, mapping['title']))
+                            self.wfile.write('<table cellborder="0">\n')
+                            for index in range(0, len(values[gkey])):
+                                self.wfile.write("<tr><td>\n")
+                                errIdx="%s%d" % (group, index)
+                                idelem="%s:%d" % (idkey,index)
+                                if not errors.has_key(errIdx): errors[errIdx]={}
+                                self.render_element(mapping, index, values[gkey], errors[errIdx], idelem, "%d" % index)
+                                self.wfile.write("</td></tr>\n")
+                            self.wfile.write("</table>\n")
+                            self.wfile.write("</fieldset>\n")
+                            self.wfile.write("</td></tr>\n")
+                    else:
+                        if mapping.has_key('note'):
+                            note=mapping['note']
+                        else:
+                            note=""
+                        self.wfile.write("<tr><td>\n")
+                        if not errors.has_key(gkey): errors[gkey]={}
+                        self.render_group(mapping['mapping'], values[gkey], errors[gkey], mapping['title'], key=gkey, level=level+1, note=note, idstr=idkey)
+                        self.wfile.write("</td></tr>\n")
+                else:
+                    self.render_element(mapping, gkey, values, errors, idkey, mapping['title'])
+                        
+        self.wfile.write("</table>\n")
+        self.wfile.write("</fieldset>\n")
+    
+    def sendImage(self):
+        #
+        # check if a logo file exists
+        #
+        try:
+            open(LXC_FILE, "r")
+            lxcImage='<img  height="%s"  src="%s"  border="0" >' % (self.logoHeight,LXC_FILE)
+        except:
+            lxcImage=""
+        if self.logoHeight:
+            self.wfile.write("""
+            <p>
+                %s
+                <img
+                    height="%s"
+                    src="%s"
+                    border="0" 
+                >
+                <br>
+            </p>
+            """ % (lxcImage,self.logoHeight, LOGO_FILE))
+        
+    def loading(self):
+        #
+        # check if a logo file exists
+        #
+        if True or os.path.exists(LOADING_GIF):
+            return """
+            <p><img
+                src="%s"
+                border="0" ><br>
+            </p>
+            """ % (LOADING_GIF)
+        
+        
+    def render(self):
+        self.send_response(200)
+        self.send_header('Content-type',	'text/html')
+        self.end_headers()
+        self.wfile.write(style)
+        self.wfile.write("<TITLE>%s</TITLE>" % self.schema['title'])
+        self.wfile.write('<form action="" method="POST">\n')
+        self.sendImage()
+        self.render_group(self.schema['mapping'], self.root, self.errors, self.schema['title'])
+        self.wfile.write('<p class="legend">*required field</p><br>\n')
+        self.wfile.write('<input type="submit" name="submit" value="Save" class="button">\n')
+        self.wfile.write('<input type="submit" name="submit" value="Reset" class="button">\n')
+        self.wfile.write('</form>\n')
+        #self.wfile.write("<pre>%s</pre>" %json.dumps(schema, sort_keys=True, indent=4))
+
+    def do_GET(self):        
+    
+        decodedPath=urllib.unquote(self.path)
+        
+        fields=decodedPath.split('/')
+        if decodedPath=="/":
+            handlers, interests, self.root, self.schema = get_systeminfo([])
+            self.render()
+        elif decodedPath==LOGO_FILE:
+            self.send_response(200)
+            self.send_header('Content-type',        'image/png')
+            self.end_headers()
+            data = open(LOGO_FILE, 'rb').read()
+            self.wfile.write(data)
+        elif decodedPath==LXC_FILE:
+            self.send_response(200)
+            self.send_header('Content-type',        'image/png')
+            self.end_headers()
+            data = open(LXC_FILE, 'rb').read()
+            self.wfile.write(data)
+        elif decodedPath==LOADING_GIF:
+            self.send_response(200)
+            self.send_header('Content-type',        'image/gif')
+            self.end_headers()
+            data = open(LOADING_GIF, 'rb').read()
+            self.wfile.write(data)
+            self.wfile.flush()
+        elif len(fields) > 1 and fields[1]=='getSystemInfo':
+            class Test:
+                def __init__(self):
+                    self.contents = ''
+                def body_callback(self, buf):
+                    self.contents = self.contents + buf
+            args=""
+            for i in range(2, len(fields)):
+                args="%s %s" % (args, fields[i])
+            self.send_response(200)
+            self.send_header('Content-type',        'application/octet-stream')
+            self.end_headers()
+            child = subprocess.Popen("getSystemInfo %s" % args, stdout=subprocess.PIPE, shell=True)
+            self.wfile.write(json.dumps(child.communicate()[0]))
+            child.stdout.close()
+            del child
+        else:
+            removeIt=False
+            self.send_response(200)
+            self.send_header('Content-type',        'application/octet-stream')
+            self.end_headers()
+            self.log("get file '%s" % decodedPath)
+            if os.path.exists(decodedPath):
+                log("Found file '%s'" % decodedPath)
+                filePath=decodedPath
+            else:
+                self.log("Not found '%s'" % filePath)
+                self.send_error(404)
+                return
+            bytes=0
+            chunks=0
+            try:
+                f = open(filePath, 'rb')
+                try:
+                    data=f.read()
+                    while len(data):
+                        try:
+                            self.wfile.write(data)
+                            bytes=bytes+len(data)
+                            chunks=chunks+1
+                        except:
+                            self.wfile.write("Socket write error on '%s'" % filePath)
+                            f.close()
+                            return
+                        data=f.read()
+                except:
+                    self.wfile.write("Read error on '%s'" % filePath)
+                    f.close()
+                    return
+                f.close()
+            except:
+                self.wfile.write("Open error on '%s'" % filePath)
+                f.close()
+                return
+            if removeIt:
+                os.unlink(filePath)
+            log("%d bytes writen in %d chunks for '%s'" % (bytes, chunks, filePath))
+        return
+        
+    def postAssign(self, fvalue, type):
+        if type == "bool":
+            if fvalue == "on":
+                return True
+            else:
+                return False
+        elif type == "int":
+            try:
+                return int(fvalue)
+            except:
+                return -1
+        elif type == "str":
+            return fvalue
+        else:
+            log("Invalid type '%s'" % type)
+            raise Exception("Invalid type '%s'" % type)
+    #
+    # assign field from POST to dict
+    #
+    def postSearchAssign(self, form, field, type):
+        return self.postAssign(form[field].value, type)
+   #
+    # Search the form data based on a hierarchecal naming convention
+    #
+    def reconstruct(self, root, form, schema, name=""):
+        for key in root:
+            kname="%s:%s" % (name, key)
+            if isinstance(root[key], dict):
+                self.reconstruct(root[key],form,schema[key]['mapping'],name=kname)
+            elif isinstance(root[key], list):
+                for index in range(0,len(root[key])):
+                    knameidx="%s:%d" % (kname,index)
+                    sch=schema[key]['sequence'][0]
+                    if sch.has_key('mapping'):
+                        self.reconstruct(root[key][index],form,sch['mapping'],name=knameidx)
+                    elif form.has_key(knameidx):
+                        root[key][index]=self.postAssign(form[knameidx].value,sch['type'])
+            else:
+                if form.has_key(kname):
+                    root[key]=self.postAssign(form[kname].value,schema[key]['type'])
+                elif schema[key]['type'] == 'bool':
+                    # unchecked checkbox and empty input cases. Not in Form.
+                    root[key]=False
+
+    def do_POST(self):
+        form = cgi.FieldStorage(
+            fp=self.rfile, 
+            headers=self.headers,
+            environ={'REQUEST_METHOD':'POST',
+                     'CONTENT_TYPE':self.headers['Content-Type'],
+                     })
+        if form.has_key('json'):
+            log("Datalen='%s'"  % form['json'].value)
+            child = subprocess.Popen("setSystemInfo", stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True)
+            child.stdin.write(form['json'].value)
+            out=child.communicate()[0]
+            del child        
+            self.wfile.write('<html><body>%s</body></html>' % out)
+            return
+        elif form.has_key('submit') :
+            if form['submit'].value=="Reset":
+                global root
+                root=copy.deepcopy(initvalues)
+                self.root=root
+            else:
+                self.reconstruct(self.root, form, self.schema['mapping'])
+            
+        log("================================================================")
+        log('Client: %s' % str(self.client_address))
+        log('User-agent: %s' % str(self.headers['user-agent']))
+        log('Path: %s' % self.path)
+        log("       --------------------------------")
+        log('       Form data:')
+        log("       --------------------------------")
+
+        # Echo back information about what was posted in the form
+        log(form)
+        for field in form.keys():
+            field_item = form[field]
+            if not field_item.filename:
+                # Regular form value
+                log('\t%s=%s\n' % (field, form[field].value))
+        log("       --------------------------------")
+        if form.has_key('submit') and form['submit'].value=="Save":
+            log("================================================================")
+            log("Setting new values to for mode '%s':" % self.curMode)
+            log(json.dumps(self.root, sort_keys=True, indent=4))
+            self.errors, foundErrors=set_systeminfo(self.root, validateKey=self.curMode);
+            #
+            # if initmode is now turned off we need to excuse outselves and 
+            # tell init to go to level 5
+            #
+            if not foundErrors :
+                newMode=self.root['System']['EnableInitmode']
+                if newMode:
+                    newMode='initmode'
+                    msgMode='Initmode'
+                else:
+                    newMode='appmode'
+                    msgMode="Application"
+                if newMode != self.curMode:
+                    phrase="%s interface being started, please wait..." % msgMode
+                    refresh=60
+                else:
+                    phrase="Saving, please wait..."
+                    refresh=2
+                    
+                self.send_response(200)
+                self.send_header('Content-type',	'text/html')
+                self.end_headers()
+                self.sendImage()
+                self.wfile.write("""
+                <META HTTP-EQUIV="Cache-Control" CONTENT="no-cache">
+                <META HTTP-EQUIV="Pragma" CONTENT="no-cache">
+                <META HTTP-EQUIV="Refresh" CONTENT="%d">
+                """ % refresh)
+                self.wfile.write("<TITLE>%s</TITLE>" % self.schema['title'])
+                self.wfile.write("""
+                <div align="center">
+                %s
+                %s
+                </div>
+                """ % (phrase, self.loading()))
+                self.wfile.flush()
+                time.sleep(1)
+                return
+        else:
+            # scan through the key for + and - ops
+            for field in form.keys():
+                keys=field.split(':')
+                op=form[field].value
+                if op != '+' and op != '-':
+                    continue
+                # reconstruct the values from form
+                self.reconstruct(self.root, form, self.schema['mapping'])
+                self.root=execOp(self.root, op, keys[1:])
+                break     
+                    
+        log("================================================================")
+        self.render()
+        return
+
+if port != 80:   
+    os.system("ufw allow %d/tcp; service firewall restart 2>/dev/null 1>&2" % port)
+
+count=0
+while count < 120:
+    try:
+        http=HTTPServer(('', port), handlerClass)
+        break
+    except:
+        print "Could not connect to port %d" % port
+        time.sleep(1)
+        count=count+1
+
+#
+# deamonize ourselves
+#
+if not debug:
+    try:
+        pid = os.fork()
+    except OSError, e:
+        raise Exception, "%s [%d]" % (e.strerror, e.errno)
+
+    if (pid == 0):  
+        os.setsid()
+        try:
+            pid = os.fork()
+        except OSError, e:
+            raise Exception, "%s [%d]" % (e.strerror, e.errno)
+        if (pid != 0):
+            open("/var/run/webServer.pid", "w").write(str(pid))
+            os._exit(0)
+    else:
+        os._exit(0)
+    
+http.serve_forever()

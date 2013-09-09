@@ -1,0 +1,64 @@
+#! /bin/bash
+#
+# Wrapper script for manual (command line) install
+#
+usage()
+{
+    echo "usage : $prog <tarball file name>"
+    echo "        ex: $prog /home/rimsupport/Rim-Jenkins-1.1.0-4321-047.tgz"
+    exit 1
+}
+prog=$0
+file=$1
+[ -f "$file" ] || usage
+
+fname=`basename $file`
+dirname=`dirname $file`
+dirname=`(cd $dirname && /bin/pwd)`
+file=$dirname/$fname
+
+if [ "`id -u`" != 0 ]
+then
+    exec sudo bash $0 $*
+fi
+
+[ "$file" ] || usage
+
+#
+# get a handle on our current cuntime
+#
+. /sbin/rimFuncs
+getBootOptions
+if [ ! -d  /${rimPubSoft}/$version ] 
+then
+    echo "Curent version not set or directory does not exist?"
+    exit 1
+fi
+setNodeEnvironment
+
+#
+# position ourselves insize the right directory
+#
+echo -n "Cleanung up installtion directory..."
+instBase=/$rimPubData/inst
+rm -rf $instBase
+mkdir -p $instBase
+cd $instBase
+echo "done."
+
+#
+# Untar the package here
+#
+echo -n "Extracting update from file '$file'"...
+tar xf $file 2>/dev/null 1>&2 
+echo "done."
+if [ ! -f ./installRim ]
+then
+    echo "Invalid package file."
+    exit 1
+fi
+
+#
+# Start the installation itself
+echo "Starting the installation..."
+exec ./installRim

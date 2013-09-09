@@ -1,0 +1,114 @@
+#!/bin/bash
+#
+#
+# Special case for scratch installs isos - don't need to be root
+# This use case runs on the build host - not on the target.
+# We also assume we are in the build artifact directory of the build.
+#
+echo "Iso image creation."
+
+softDir=artifacts
+isoDir=$softDir
+
+#
+# must be runing from a build artifact directory (a repository)
+#
+pushd $softDir 1>/dev/null
+if [ ! -f ./bom.sh ] 
+then
+    echo "You need to run makeiso from unpacked directory itself. Use command 'cdbuild'"
+    exit 1
+fi
+
+. ./rimFuncs
+. ./bom.sh
+
+${RIM_PRODUCT}
+setNodeName
+popd 1>/dev/null
+
+#
+# we substiture COMPANY and PRODUCT by their values form the bom file
+# and we add the devices and partition information to the boot cmdline
+# This way the scratchInstall process will have all the info to handle
+# the local storage and access the boot device before firing up the
+# install program.
+#
+function customizeCfgFile() # <file path/name>
+{
+    cat $1  | sed  -e "s^PRODUCT^$rimProduct^" $1 > $1.new
+    cat $1.new | awk '
+        /APPEND/{
+            printf("%s rim_node=%s\n", $0, node);
+            next;
+        } {print;}' node=$rim_node > $1
+}
+
+# 
+# We look for isolinux directory in the node, application and common areas 
+# in sequence
+#
+bootFilesDirName=isolinux
+CUSTOMROOT=$RIMSCS/buildbase/custom
+bootFilesDir[${#bootFilesDir[@]}]=$CUSTOMROOT/$rim_node/$bootFilesDirName
+bootFilesDir[${#bootFilesDir[@]}]=$CUSTOMROOT/$rim_application/$bootFilesDirName
+bootFilesDir[${#bootFilesDir[@]}]=$CUSTOMROOT/common/$bootFilesDirName
+
+#
+# clean up previous data is any
+#
+/bin/rm -f *.iso
+/bin/rm -fr $isoDir/$bootFilesDirName
+#
+# make a copy of the kernel and initrd with simple names
+#
+echo -n "Copying files for version $rimBuildLabel ... "
+cp $isoDir/kernel_$rim_variant $isoDir/kernel
+cp $isoDir/initrd-*_$rim_variant.fs $isoDir/initrd
+isoFile=$rimBuildLabel.iso
+foundBootFiles=false
+for dir in ${bootFilesDir[@]}
+do
+    if [ -d $dir ]
+    then
+        [ -f $dir/isolinux.bin ] && foundBootFiles=true
+        mkdir -p $isoDir/$bootFilesDirName
+        for file in $dir/*; do
+            cp -pf $file $isoDir/$bootFilesDirName
+        done 
+        customizeCfgFile $isoDir/$bootFilesDirName/isolinux.cfg
+        chmod a-w $isoDir/$bootFilesDirName/*
+        break;
+    fi
+done
+if ! $foundBootFiles
+then
+    echo "Not finding boot files for an ISO build!" 
+    exit 1
+fi
+echo "Done."
+echo -n "Creating iso image... "
+#
+# Create the iso itself
+#
+cmd="xorriso \
+    -as mkisofs \
+    -isohybrid-mbr ${RIMSCS}/tools/usr/lib/syslinux/mbr/isohdpfx.bin \
+    -partition_offset 16 \
+    -R \
+    -b isolinux/isolinux.bin \
+    -c .catalog \
+    -no-emul-boot \
+    -boot-load-size 4 \
+    -boot-info-table \
+    -l \
+    -r \
+    -N \
+    -d \
+    -V $(echo $rimBuildLabel | awk -F- '{printf("%s-%s-%s", $1,$2,$3);}')\
+    -o $isoFile $isoDir"
+echo $cmd > $isoDir/.mkisofs
+capture $cmd || abort "Error creating iso image."
+echo "Done."
+echo "Iso creation done - iso file is `pwd`/$isoFile"
+exit 0

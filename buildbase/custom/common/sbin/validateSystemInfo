@@ -1,0 +1,34 @@
+#!/usr/bin/env python
+
+""" validateSystemInfo
+
+Code to update system settings brought together in one script
+
+Exercise the validate hooks on the supplied configuration.
+This command can be used to run certain tests without actually saving to 
+persistant config. For exmaple backup test is preformed this way.
+
+"""
+
+import sys
+
+import simplejson
+
+from settings.system import *
+
+data = sys.stdin.readlines()
+
+#
+# convert from unicode to string
+#
+val = str(''.join(data))
+
+struct = simplejson.loads(val)
+
+handlers, interests, old, schema = get_systeminfo()
+
+errors={}
+foundErrors=validate(struct, schema['mapping'], handlers, "", errors)
+
+errors={ 'success': not foundErrors, 'errors' : errors }
+print simplejson.dumps(errors, sort_keys=True, indent=4)

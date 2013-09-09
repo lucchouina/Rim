@@ -1,0 +1,7 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          final8
+# Required-Start:    watchdog
+# Default-Start:     8
+# Short-Description: patcher for products where level 8 is not implemented
+### END INIT INFO

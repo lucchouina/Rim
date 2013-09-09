@@ -1,0 +1,1 @@
+/usr/share/pyshared/ubuntuone/syncdaemon/events_nanny.py

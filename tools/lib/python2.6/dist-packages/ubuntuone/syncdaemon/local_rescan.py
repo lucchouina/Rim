@@ -1,0 +1,1 @@
+/usr/share/pyshared/ubuntuone/syncdaemon/local_rescan.py

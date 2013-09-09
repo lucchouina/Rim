@@ -1,0 +1,54 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:        dmesg
+# Required-Start:
+# Required-Stop:
+# Default-Start:   3 5 8
+# Default-Stop: 
+# Short-Description: Save dmesg to log
+### END INIT INFO
+
+umask 022
+
+. /lib/lsb/init-functions
+
+export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
+
+doit()
+{
+    (
+        echo ================================================================
+        echo `date` " : $1"
+        echo ================================================================
+        dmesg -s 524288 
+    ) >> /var/log/dmesg
+}
+
+case "$1" in
+  start)
+    
+ 	log_daemon_msg "Saving dmesg" "dmesg"
+	if doit "coming up"
+    then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+	;;
+
+  stop)
+ 	log_daemon_msg "Saving Dmesg while Going down" "dmesg"
+	if doit "going down"
+    then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+	;;
+
+  *)
+	log_action_msg "Usage: /etc/init.d/dmesg {start|stop}"
+	exit 1
+esac
+
+exit 0

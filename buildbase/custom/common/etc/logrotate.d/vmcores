@@ -1,0 +1,6 @@
+/data/crash/vmcore
+{
+	rotate 3
+	missingok
+	compress
+}

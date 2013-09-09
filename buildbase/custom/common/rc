@@ -1,0 +1,77 @@
+#! /bin/sh
+#
+# rc
+#
+# Starts/stops services on runlevel changes.
+#
+# Optimization: A start script is not run when the service was already
+# configured to run in the previous runlevel.  A stop script is not run
+# when the the service was already configured not to run in the previous
+# runlevel.
+#
+# Authors:
+# 	Miquel van Smoorenburg <miquels@cistron.nl>
+# 	Bruce Perens <Bruce@Pixar.com>
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
+# Make sure the name survive changing the argument list
+scriptname="$0"
+
+umask 022
+
+on_exit() {
+	echo "error: '$scriptname' exited outside the expected code flow."
+}
+trap on_exit EXIT # Enable emergency handler
+
+# Ignore CTRL-C only in this shell, so we can interrupt subprocesses.
+trap ":" INT QUIT TSTP
+
+# Set onlcr to avoid staircase effect.
+stty onlcr 0>&1
+
+# Now find out what the current and what the previous runlevel are.
+
+runlevel=$RUNLEVEL
+# Get first argument. Set new runlevel to this argument.
+[ "$1" != "" ] && runlevel=$1
+if [ "$runlevel" = "" ]
+then
+	echo "Usage: $scriptname <runlevel>" >&2
+	exit 1
+fi
+previous=$PREVLEVEL
+[ "$previous" = "" ] && previous=N
+
+export runlevel previous
+
+if [ -f /lib/lsb/init-functions ] ; then
+	. /lib/lsb/init-functions
+else
+	log_action_msg() { echo $@; }
+	log_failure_msg() { echo $@; }
+	log_warning_msg() { echo $@; }
+fi
+
+# Is there an rc directory for this new runlevel?
+if [ -d /etc/rc$runlevel.d ]
+then
+    # Run all scripts with the same level in parallel
+    CURLEVEL=""
+    list="`ls /etc/rc$runlevel.d/K* 2>/dev/null`"
+    for s in $list
+    do
+	    $s stop
+    done
+    list="`ls /etc/rc$runlevel.d/S* 2>/dev/null`"
+    for s in $list
+    do
+	    $s start
+    done
+fi
+
+trap - EXIT # Disable emergency handler
+
+exit 0

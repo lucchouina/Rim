@@ -1,0 +1,1 @@
+/usr/share/pyshared/ubuntuone/storageprotocol/errors.py

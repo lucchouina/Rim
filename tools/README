@@ -1,0 +1,8 @@
+#
+# some notes for now on how we build things.
+
+curdir=`dirname $0`
+curdir=`(cd $curdir && /bin/pwd)`
+
+# SCONS
+cd ../vendors/opensource/scons/current && python setup.py install --prefix=$curdir/../tools

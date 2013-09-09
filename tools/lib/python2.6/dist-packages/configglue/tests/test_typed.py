@@ -1,0 +1,1 @@
+/usr/share/pyshared/configglue/tests/test_typed.py

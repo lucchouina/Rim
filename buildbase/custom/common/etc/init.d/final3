@@ -1,0 +1,7 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          final3
+# Required-Start:    network
+# Default-Start:     3
+# Short-Description: out of the box level goal
+### END INIT INFO

@@ -1,0 +1,25 @@
+# Level to run in
+# NOTE: do not change this line, it will be modified by the initmode process
+#
+id:3:initdefault:
+
+# Boot-time system configuration/initialization script.
+si2::sysinit:/etc/init.d/rcS
+
+# What to do in single-user mode.
+sigl:S:wait:/bin/bash
+
+# start syslog asap
+logr:03568:respawn:/usr/sbin/rsyslogd -n -c5
+# start cron now - watchdog will be looking for it
+cron:358:respawn:/usr/sbin/cron -f -L 0
+
+l0:0:wait:/etc/init.d/rc 0
+l1:1:wait:/etc/init.d/rc 1
+l3:3:wait:/etc/init.d/rc 3
+l5:5:wait:/etc/init.d/rc 5
+l6:6:wait:/etc/init.d/rc 6
+l8:8:wait:/etc/init.d/rc 8
+
+S1:358:respawn:/sbin/getty ttyS0 115200 xterm
+S2:358:respawn:/sbin/getty tty1 115200 xterm

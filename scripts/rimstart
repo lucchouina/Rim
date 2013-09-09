@@ -1,0 +1,174 @@
+#! /bin/bash
+#
+# This script can be sourced by tcsh or bash.
+# $1, is supplied defines the shell type
+# default i sbash
+interpreter=bash
+[ "$1" ] && interpreter=$1
+
+
+######################################
+# Path manipulation functions
+######################################
+
+function pathremove () 
+{
+        local IFS=':'
+        local NEWPATH
+        local DIR
+        local PATHVARIABLE=${2:-PATH}
+        for DIR in ${!PATHVARIABLE} ; do
+                if [ "$DIR" != "$1" ] ; then
+                  NEWPATH=${NEWPATH:+$NEWPATH:}$DIR
+                fi
+        done
+        export $PATHVARIABLE="$NEWPATH"
+}
+
+function pathprepend () 
+{
+        pathremove $1 $2
+        local PATHVARIABLE=${2:-PATH}
+        export $PATHVARIABLE="$1${!PATHVARIABLE:+:${!PATHVARIABLE}}"
+}
+
+function pathappend () 
+{
+        pathremove $1 $2
+        local PATHVARIABLE=${2:-PATH}
+        export $PATHVARIABLE="${!PATHVARIABLE:+${!PATHVARIABLE}:}$1"
+}
+
+#######################################
+# Rim env setup 
+#######################################
+
+if [ ! "$RIM_WORKSPACE" ]
+then
+    (
+    echo "Please define \$RIM_WORKSPACE"
+    ) 2>&1
+    exit 1
+fi
+
+RIMBASE=${RIM_WORKSPACE}/rim_${RIM_VERSION}
+RLIBS=$RIMBASE/tools/lib
+RLIBARCH=$RLIBS/`uname -m`
+SCONSFLAGS="-Q -j3 -u -C $RIMBASE"
+
+# PYTHON
+pathprepend PYTHONPATH=$RLIBS/python2.6  PYTHONPATH
+pathprepend $RIMBASE/scripts   PYTHONPATH
+pathprepend $RIMBASE/scripts             PYTHONPATH
+pathprepend $RLIBS/scons-2.1.0           PYTHONPATH
+
+# MAN
+pathprepend /usr/share/man MANPATH
+pathprepend $RIMBASE/tools/man          MANPATH
+
+# BINs
+pathprepend "$RIMBASE"
+pathprepend $RIMBASE/tools/bin
+pathprepend "$RIMBASE/tools/bin/`uname -m`" PATH
+
+# LD LIBS
+pathprepend $RLIBS/python2.6            LD_LIBRARY_PATH
+pathprepend $RLIBARCH                   LD_LIBRARY_PATH
+pathprepend $RLIBS                      LD_LIBRARY_PATH
+
+if [ ! "$RIM_PRODUCT" ]
+then
+    echo "Please define \$RIM_PRODUCT."
+    rimtarget
+    exit 1
+fi
+#
+# give a list of the products defined in the App config
+#
+function listProducts()
+{
+    (
+        echo "Select one of :"
+        rimtarget
+    ) 1>&2
+}
+#
+# check that a target product was defined (M1, Global, NodeSim etc...)
+#
+if [ ! "$RIM_PRODUCT" ]
+then
+    listProducts
+    exit 1
+fi
+#
+# function to check if a specified product is defined
+#
+function rimProduct()
+{
+    targets=`rimtarget`
+    for t in $targets
+    do
+        if [ $t == $RIM_PRODUCT ]
+        then
+            return 0
+        fi
+    done
+    return 1
+}
+if ! rimProduct
+then
+    (
+        echo "Invalid product '$RIM_PRODUCT' specified"
+        listProducts
+    ) 1>&2
+   exit 1
+fi
+
+variables="
+    PATH
+    PYTHONPATH
+    LD_LIBRARY_PATH
+    MANPATH
+    SCONSFLAGS
+    RIMBASE
+    RIMSCS
+"
+
+function echoIt_bash()
+{
+    val=`eval echo \\$${1}`
+    echo "export $1='$val';"
+}
+
+function echoIt_tcsh()
+{
+    val=`eval echo \\$${1}`
+    echo "setenv $1 '$val';"
+}
+
+RIMSCS=$RIM_WORKSPACE/rim_$RIM_VERSION
+function alias_bash()
+{
+    echo $functionvar
+    echo "unset rimpkg rimiso rimake cdrim cdroot;"
+    echo "unalias rimpkg rimiso rimake cdrim cdroot 2>/dev/null;"
+    echo "alias cdbuild='cd $RIM_WORKSPACE/$RIM_BRANCH/$RIM_PRODUCT';"
+    echo "alias cdrim='cd $RIM_WORKSPACE/rim_$RIM_VERSION/scripts/rimListOsPaths';"
+    echo "alias cdroot='cd $RIM_WORKSPACE/roots_`rimbranch -s roots`/`$RIM_WORKSPACE/rim_$RIM_VERSION/scripts/rimListOsPaths`';"
+    echo "alias cdtools='cd $RIM_WORKSPACE/rim_$RIM_VERSION/tools';"
+    echo "alias rimrelease='export BLD_TAG=%s-%s-%s-%s';"
+}
+
+function alias_tcsh()
+{
+    echo "alias cdrim 'cd $RIM_WORKSPACE/$RIM_BRANCH/$RIM_PRODUCT';"
+    echo "alias cdroot 'cd $root';"
+}
+
+for var in $variables
+do
+    echoIt_$interpreter $var
+done
+alias_$interpreter
+
+exit 0   

@@ -1,0 +1,112 @@
+#! /bin/bash
+#
+# make sure path is setup properly
+# this command can be executed from ssh, sudo and command line.
+#
+export PATH=$PATH:/sbin:/bin:/usr/sbin:/usr/bin
+#
+# Let generic functions find out what platform and devices we are dealing
+# with.
+#
+. /sbin/rimFuncs
+getDiskNames
+#
+# if the optional 'show' parameter is given we print the status
+# of the mirror. 'mirrorred' or 'unmirrorred'
+if [ "$1" == status ]
+    then
+    status=unmirrorred
+    # if any of the mirrors
+    for mirror in 1 2 3 4 5 6
+    do
+        [ -b /dev/md$mirror ] \
+        && (mdadm -D /dev/md$mirror 2>/dev/null | grep -q "Working Devices : 2") \
+        && status=mirrorred \
+        && break
+    done
+    echo "Overall Disk Operational Status : $status"
+    exit 0
+    fi
+# 
+#
+# figure out what we are running right now
+# Same script will be used to re-establilsh the mirror both ways
+#
+rootFs="`df / | tail -1 | awk '{print $1}'`" 
+if [ "$1" == scratch ]
+    # force it for scratch installs - we haven't pivot_rooted yet
+    then
+    rootFs=unionfs
+fi
+case $rootFs in
+     unionfs) # Legacy merged to Rim
+        echo "Committing disk mirror to upgraded side."
+        # disk source names
+        sdisk=/dev/$diskAname
+        ddisk=/dev/$diskBname
+        sdnames=$diskAnames
+        # raid source names
+        smdnames=(/dev/md1 /dev/md2 /dev/md3)
+        # raid destination names
+        dmdnames=(/dev/md4 /dev/md5 /dev/md6)
+        umount -f /legacy/tpdata 2> /dev/null
+        umount -f /legacy 2> /dev/null
+    ;;
+     /dev/md*) # First boot after rollback from rim to Legacy
+        echo "Committing disk mirror to rollback side."
+        # disk source names
+        sdisk=/dev/$diskBname
+        ddisk=/dev/$diskAname
+        sdnames=$diskBnames
+        # raid source names
+        smdnames=(/dev/md4 /dev/md5 /dev/md6)
+        # raid destination names
+        dmdnames=(/dev/md1 /dev/md2 /dev/md3)
+        # Already did this? yes -> exit
+        [ "`mdadm -D /dev/md1 | grep /dev/$diskBname`" ] && exit 0
+    ;;
+    *) 
+        echo "Unexpected disk configuration found - aborting."
+        exit 1 
+esac
+
+# cycle through all md devices removing all traces of disk 2 devices
+# this step frees up the source drive so it can be partitionned
+for md in ${smdnames[*]}
+do
+    echo -n "Stopping raid $md..."
+    mdadm -S $md 1>/dev/null 2>&1
+    echo "Done"
+done
+
+#
+# Always rewrite the partition table and mark as raided type.
+# The raided partitionning is one off on some of the sector positions
+# to ensure we rebuld filsystems when switching back and forth.
+# 
+echo -n "Syncing up partition tables..."
+(sfdisk -uS -d $ddisk | sfdisk --force -uS $sdisk) 2>/dev/null 1>&2
+echo "Done."
+
+#
+# re-assemble the mirror
+idx=0
+for md in ${dmdnames[*]}
+do
+    echo -n "Adding device ${sdnames[$idx]} to raid $md..."
+    mdadm --manage --add $md /dev/${sdnames[$idx]} 2>/dev/null || exit 1
+    let idx=$idx+1
+    echo "Done"
+done
+
+#
+# sync the MBR 
+# This assumes that he firsdt 63 sectors of the devices are free for grub and MBR
+# Legacy has 63 sectors free, rim has 64. Syncing 63 is plenty.
+#
+echo -n "Syncing up Master Boot Block (MBR)..."
+dd if=$ddisk of=$sdisk count=63  2>/dev/null 1>&2
+sleep 1
+echo "Done"
+
+exit 0

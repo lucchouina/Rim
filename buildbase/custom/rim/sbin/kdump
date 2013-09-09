@@ -1,0 +1,10 @@
+#! /bin/bash
+mount -t proc /proc /proc
+mkdir -p /var/crash
+echo -n "Saving vmcore file to /var/crash..."
+savelog -q -p -l -c 5 /var/crash/vmcore
+cp /proc/vmcore /var/crash/vmcore
+sync
+echo "done."
+echo -n "Rebooting..."
+reboot -f

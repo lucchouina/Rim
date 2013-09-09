@@ -1,0 +1,1 @@
+/usr/share/pyshared/ubuntuone/storageprotocol/__init__.py

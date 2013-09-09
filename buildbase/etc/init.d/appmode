@@ -1,0 +1,41 @@
+#! /bin/bash
+### BEGIN INIT INFO
+# Provides:          appmode
+# Required-Start:    net
+# Required-Stop:
+# Default-Start:     5
+# Default-Stop:      0 1 6
+# Short-Description: appmode web service
+# Description:       This service will start webServer on port 80 or 81
+### END INIT INFO
+
+#
+# This is a wrapper over initmode.
+# The webserver will check the current initmode setting and 
+# bail out if not config for appmode
+#
+if [ "$2" ]
+then
+    # appmode will call with this args 
+    DAEMON_ARGS=$2
+else
+    # select port based on App.xml config for this node
+    . /sbin/rimFuncs
+    setNodeEnvironment
+    if [ "$initmodePort" ]
+    then
+        DAEMON_ARGS=$appmodePort
+    else
+        DAEMON_ARGS="81"
+    fi
+fi
+case "$1" in
+  start|stop|status|restart|force-reload)
+	/etc/init.d/initmode $1 $DAEMON_ARGS
+    exit $?
+	;;
+  *)
+	echo "Usage: appmode {start|stop|status|restart|force-reload}" >&2
+	exit 3
+	;;
+esac

@@ -1,0 +1,8 @@
+#!/bin/bash
+if [ "`id -u`" != 0 ]
+then
+    echo "You must be root to run this command"
+    exit 1
+fi
+[ -f /etc/revert.cfg ] || exit 1
+cat /etc/revert.cfg | setSystemInfo

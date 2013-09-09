@@ -1,0 +1,8 @@
+### BEGIN INIT INFO
+# Provides:          all
+# Required-Start:    rc1 rc2
+# Required-Stop:
+# Default-Start:     3 5
+# Default-Stop:      0 1 6
+# Short-Description: fire up the network interfaces
+### END INIT INFO

@@ -1,0 +1,34 @@
+#!/usr/bin/env python
+
+""" 
+Used during upgrades to translate a previous config to a new config
+"""
+
+import sys
+
+import simplejson
+
+from settings.system import *
+
+# read in incoming configuration
+data = sys.stdin.readlines()
+val = str(''.join(data))
+incoming = simplejson.loads(val)
+
+keys=[]
+if len(sys.argv) > 1: keys=sys.argv[1:]
+else: keys=[]
+
+# get current configuration
+handlers, interests, root, schema = get_systeminfo(keys)
+
+# call all available translation functions
+out={}
+for key in handlers:
+    mod=handlers[key]
+    if 'translate' in dir(mod):
+        mod.translate(incoming, out)
+    elif incoming.has_key(key):
+        out[key]=incoming[key]
+
+print simplejson.dumps(out, sort_keys=True, indent=4)

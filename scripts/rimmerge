@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+"""
+   Checkout the source code for a branch.
+   By default, place the code under a directory of that branch's name
+   under the RIM_WORKSPACE location.
+"""
+import os, sys
+import getopt
+from scscomp import *
+import rimenv
+
+def usage():
+    print "usage: rimcheckout <branchName>"
+    sys.exit(1)
+
+if not os.getenv("RIM_BRANCH") and not len(sys.argv[1:]):
+    usage()
+
+if not os.getenv("RIM_BRANCH"):
+    if not rimenv.chkBranch(sys.argv[1], verbose=True):
+        sys.exit(1)
+    os.putenv("RIM_BRANCH", sys.argv[1])
+
+rimenv.chkEnv()
+
+scscomp=ScsComp()
+
+scscomp.forAllComps('merge')
+
+sys.exit(0)

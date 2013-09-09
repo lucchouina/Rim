@@ -1,0 +1,10 @@
+#! /bin/bash
+#
+# start build 
+#
+dir="$1"
+[ "$dir" ] || dir=/
+dir=`cd $dir && pwd`
+[ "$SCONSJVALUE" ] || SCONSJVALUE=3
+export SCONSFLAGS="-Q $SCONSEXTRAS -j$SCONSJVALUE -u -C $RIM_WORKSPACE/rim_${RIM_VERSION}"
+scons $dir

@@ -1,0 +1,1 @@
+/usr/share/pyshared/ubuntuone/syncdaemon/fsm/__init__.py

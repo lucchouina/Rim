@@ -1,0 +1,134 @@
+#!/bin/bash
+
+#
+# Setup an SD card for a arm uboot target
+#
+
+# Requires:
+#     That Rim environment has been set (riminit).
+#     PWD is the actual build directory for the target product.
+#     User is 'root'.
+#
+
+#
+# Check that we are root
+    
+if [ `id -u` != 0 ]
+then
+    echo "You must be root to run this command."
+    exit 1
+fi
+
+[ "$1" == "-f" ] && remake=1 && shift
+
+myDir="`dirname $0`"
+export PATH=$PATH:$myDir/`uname -m`:.
+
+if [ ! -d ./artifacts ] 
+then
+    echo "You need to run rimakesd from the build directory itself."
+    exit 1
+fi
+
+cd artifacts
+. ./rimFuncs
+. ./bom.sh
+
+# Setup the node and variant
+# we can use RIM variable if set
+dev="$1"
+rim_node=$RIM_NODE
+[ "$rim_node" ] || setNodeName
+
+$rim_node
+
+if [ "$loaderType" != uboot ]
+then
+    echo "Current node '$rim_node' variant '$rim_variant', is not a uboot device"
+    exit 1
+fi
+
+#setNodeVariant
+
+#
+# Scan all /dev/sd devices lo
+#
+if [ ! "$dev" ]
+then
+    for dev in a b c d e f g h
+    do
+        # FIXME: good for M1 but need to discriminate between MLO and UBL for M2
+        match="`dd if=/dev/sd$dev bs=4 skip=128 count=1 2>/dev/null | od -X | grep 41504954`"
+        [ "$match" ] && break
+    done
+    [ "$match" ] || match="$sddev"
+    # check if the user has primed a sd card
+    if [ ! "$match" ]
+    then
+        echo "SD card not found. Please use the sdprimer utility to prepare an SD card"
+        echo "and make it available on this system or specify the drive letter explicitely "
+        echo "as an argument to this command. Example: 'rimakesd d'. To use /dev/sdd as the device."
+        exit 1
+    fi
+fi
+
+# good to go
+
+dev=sd$dev
+ddev=/dev/$dev
+partitionDrive $dev 0
+
+mkdir -p mnt/soft
+umount -f mnt/soft 2>/dev/null
+#
+# create the filesystems
+#
+if [ ! "$remake" ] && mount ${ddev}1 mnt/soft
+then
+    echo "  ***********************************************************"
+    echo "  *   Valid filesystem found. Filesystems not recreated.    *"
+    echo "  *   Use option '-f' to force filesystem creation.         *"
+    echo "  ***********************************************************"
+else
+    mkfs -L M1_Soft -t ext3 -I 128 ${ddev}1 || exit 1
+    mkfs -L M1_Data -t ext3 -I 128 ${ddev}3 || exit 1
+    mkswap -f ${ddev}2 || exit 1
+    mount ${ddev}1 mnt/soft || exit 1
+fi
+
+#
+# mount them
+#
+mkdir -p mnt/soft/$rimBuildLabel || exit 1
+
+#
+# drop the files into the software directory
+#
+# standard stuff first i.e. bom files, modules, kernel and utilities
+#
+mkdir -p mnt/soft/$rimBuildLabel || exit 1
+installModules mnt/soft/$rimBuildLabel
+export ROOT=mnt 
+./rimboot -n $rim_node -v $rim_variant -b $rimBuildLabel 
+
+echo "Done."
+echo "Copying kernel..."
+cp kernel_* mnt/soft/kernel
+umount -f mnt/soft
+echo "Done."
+
+# Then the uboot specific things
+#
+if [ $preLoaderType == "ubl" ]
+then
+    echo "Writing UBL and u-boot to media."
+    echo $PATH
+    sdprimer -tubl -u u-boot_${rim_variant} -p ubl_${rim_variant} $ddev
+    
+elif [ $preLoaderType == "mlo" ]
+then
+    echo "MLO device not supported yet."
+    exit 1
+fi
+sync
+sync

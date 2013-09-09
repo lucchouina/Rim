@@ -1,0 +1,23 @@
+#! /bin/bash
+#
+# Wrapper script for manual (command line) install
+#
+prog=$0
+
+if [ "`id -u`" != 0 ]
+then
+    exec sudo bash $0 $*
+fi
+
+#
+# get a handle on our current cuntime
+#
+. /sbin/rimFuncs
+setNodeEnvironment
+if [ ! -d  /${rimPubSoft}/$version ] 
+then
+    echo "Curent version not set or directory does not exist?"
+    exit 1
+fi
+# simply call into rimboot -d
+exec rimboot -d

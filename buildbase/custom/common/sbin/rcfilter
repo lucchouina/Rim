@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+#
+#
+# This script is used to filter the output of a setSystemConfig script to make it into something that
+# makes sense in terms of restart dependencies and in terms of init state transition
+#
+# The script will have a series of these commands
+# telinit <new level>
+# /etc/init.d/<service> restart
+# service <service> restart
+# restart <service>
+#
+# The entire command file is parsed and all the above commands are accumulated
+# into a series of stop and start
+# 
+# The init state transition will be looked at to determince is a start or stop 
+# need to ne removed from the final list based on the existance of suce service in the
+# source and destination states.
+#
+import os
+import sys
+import subprocess
+from rcEntries import *
+
+
+def buildActionList(script, actionList, entries, depList):
+    if script not in actionList:
+        if entries.has_key(script):
+            actionList.append(script)
+            provided=entries[script][PROVIDES]
+            for key in depList:
+                for restart in entries[key][RESTARTS]:
+                    if restart in provided and key not in actionList:
+                        buildActionList(key, actionList, entries, depList)
+
+path="/etc/init.d"
+cmdline="/proc/1/cmdline"
+
+# Read current initlevel
+curInitLevel=open(cmdline, "r").readline().split("[")[1].split("]")[0]
+newInitLevel=curInitLevel
+
+# read in the entire file and figure
+line=sys.stdin.readline()
+restartList={}
+def flagService(script, action):
+    if action != "restart":
+        sys.stderr.write("Warning: found invalid config action '%s' for service '%s'\n" % (action, script))
+        return
+    restartList[script]=True
+
+#
+# scan the file making a list of the services to be restarted
+#
+line=sys.stdin.readline()
+while len(line):
+    args=line.split()
+    if len(args) == 0 or args[0][0]=='#': 
+        print line
+        line=sys.stdin.readline()
+        continue
+    cmds=line.split(';')
+    for cmd in cmds:
+        print "cmd='%s'" % cmd
+        args=cmd.split()
+        if len(args):
+            if args[0] == "service":
+                flagService(args[1], args[2])
+            elif args[0] == "restart":
+                flagService(args[1], "restart")
+            elif args[0][-len(path):] == path:
+                flagService(args[1][len(path):], args[1])
+            elif args[0]=="telinit":
+                newInitLevel=args[1]
+            else:
+                print line
+    line=sys.stdin.readline()
+
+# create 2 list of 
+frmEntries, frmDeps=getRcEntries(curInitLevel, path)
+if curInitLevel == newInitLevel: toEntries, toDeps = frmEntries, frmDeps
+else : toEntries, toDeps=getRcEntries(newInitLevel, path)
+
+#
+# now - go over all of the restarts and create a complete list of stops and start
+actionList=[]
+for script in restartList:
+    buildActionList(script, actionList, toEntries, toDeps)
+#
+# prune the restart list with things that are not in either of the 2 states
+#
+rmList={}
+for script in actionList:
+    inCur=script in frmEntries
+    inNew=script in toEntries
+    # drop restart if the service will be affected by the state transition
+    # or if the service does not apply to current init level
+    if inCur != inNew or not inCur:
+        rmList[script]=True
+
+# do the removal here
+for script in rmList:
+    actionList.remove(script)
+    
+#
+# 
+for script in reversed(actionList):
+     print "/etc/init.d/%s stop" % script
+for script in actionList:
+     print "/etc/init.d/%s start" % script
+
+if curInitLevel != newInitLevel:
+    print "telinit %s" % newInitLevel

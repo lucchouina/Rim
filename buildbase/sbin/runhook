@@ -1,0 +1,15 @@
+#! /bin/bash
+#
+# Run a specific hook from the modules.
+# This script is called by python code in the process of doing things olike
+# backups/recovery
+#
+if . /sbin/rimFuncs
+then
+    setNodeEnvironment
+    if $*
+    then
+        exit 0
+    fi
+fi
+exit 1

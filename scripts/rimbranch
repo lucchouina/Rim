@@ -1,0 +1,347 @@
+#!/usr/bin/env python
+"""
+    Purpose of this command is to manage the config branchs.
+    User can create new branchs by deriving from existing ones.
+    rimbranch will scan the new branch and create the branches
+    that are required to match that new branch.
+    
+    The actual access to the new branch is accomplish with the
+    rimview command.
+    
+"""
+import os, sys
+import getopt
+import glob
+import subprocess
+from string import Template
+import xml.dom.minidom
+import Rim
+import RimApp
+import rimenv
+import scsOps
+from SCons import Environment
+env=Environment.Environment()
+env.vars={}
+rim=Rim.Rim(env, Rim.Rim.Shared);
+
+# read in the entire configuration for that app and site
+appFile="%s/App.xml" % os.path.dirname(__file__)
+appNode=xml.dom.minidom.parse(appFile).getElementsByTagName('application')[0]
+conf=RimApp.RimApp(appNode, rim, quiet=1)
+conf.branches=rim.branches
+verbose=False
+
+def usage():
+    print """
+    Rimbranch can be used to list and create branch spec files. The branch spec files
+    act as a record of all the sib branches used to build a certain version of a 
+    product. This includes the tools, roots and rim component as well as the 
+    product specific components themselves, like netbox, global etc...
+
+Usage 1: rimbranch  -m "<newBranchDescription>" -c <newBranchName>
+         
+         Commit a new branch spec file.
+         
+         Thie operation is executed after having created your own 
+         branch spec file in directory %s/branches, 
+         probably by copying an already existing branch spec
+         to your own branch spec file, this command will go through
+         the list of all sub bracnhes in the spec file and validate
+         that these branches already exists in the repositories.
+         
+         If a subranch does not exists in the repository, you will
+         be given the list of existing ones and asked to choose which
+         one to create the new sub branch from.
+         
+         If the sub branches you are creating already exists on the
+         corresponding repository, rimbranch will warn about it but
+         will still go ahead and create the branch spec.
+         
+         You should probably leave the roots, tools and rim sub branches
+         alone since, forking the responsability of the platform group.
+         
+         
+         newBranchName: new branch name to create
+                        ex: Global_1_0_Luc
+
+         newBranchDescription: short description of the purpose of this
+                        branch. This short phrase will be displyed 
+                        when rimbranch -l is run and will serve as 
+                        the log message to the corresponding scm 
+                        branch creation command.
+                        ex: "Global 1.0 Luc - isolated system work"
+                        
+        Example:
+        
+        For example, after copying the Global_1.0 file to Global_1.0_John
+        you would modify its content from :
+        ===
+               <?xml version='1.0' ?>
+               <branch name="Global_1.0" desc="Global 1.0 work">
+                   <scs name="global"  version="1_0"/>
+                   <scs name="rim"     version="1.0"/>
+                   <scs name="tools"   version="1.0"/>
+                   <scs name="roots"   version="1.0"/>
+               </branch>
+        ===
+        to:
+        ===
+              <?xml version='1.0' ?>
+              <branch name="Global_1.0_Luc" desc="Luc's Global 1.0 work">
+                  <scs name="global"  version="1_0_Luc"/>
+                  <scs name="rim"     version="1.0"/>
+                  <scs name="tools"   version="1.0"/>
+                  <scs name="roots"   version="1.0"/>
+              </branch>
+        ===
+        
+        Notice that change to the brnach 'name' and the 'global' scs version.
+        This change will trigger the creation of a branch:
+        
+        https://s2sys.com:444/svn/branches/global_1_0_luc
+        from one of the other branches already found present in any of the
+        other branch spec files.
+        
+
+Usage 3: rimbranch -l [-v]
+         List all available branches and their short descriptions 
+         Display sub branch details with -v option
+
+Usage 4: rimbranch -s [subbranch]
+         Return the version of the specified subbranch given the current branch environment
+
+""" % os.path.dirname(__file__)
+    sys.exit(1)
+
+branchTpl=Template("""<?xml version='1.0' ?>
+<branch name="${BRANCH}" desc="${MSG}"/>
+""")
+
+#
+# add a branch record file
+#
+def recordBranch(branch, msg, bsfile):
+    # add it
+    print "Commiting branch spec file '%s'" % bsfile
+    cmd="svn add -q %s" % bsfile
+    retCode=subprocess.call(cmd, shell=True)
+    if retCode == 0:
+        cmd=[ "svn", "commit", "-q", "-m", msg, bsfile]
+        subprocess.call(cmd)
+        if retCode == 0:
+            return True
+    print "'%s' failed with %d" % (string.join(cmd), retCode)
+    return False
+    
+#
+# remove a branch record file
+#
+def eraseBranch(branch, bsfile):
+    # add it
+    cmd="svn rm --force -q %s" % bsfile
+    retCode=subprocess.call(cmd, shell=True)
+    if retCode == 0:
+        cmd=[ "svn", "commit", "-q", "-m", 'Removal of %s' % branch.name, bsfile]
+        print cmd
+        return True
+        retCode=subprocess.call(cmd)
+        if retCode == 0:
+            return True
+    print "'%s' failed with %d" % (string.join(cmd), retCode)
+    return False
+              
+def chkBranch(branch, quiet=False):
+    # check if the parent can be found
+    if branch not in conf.branches:
+        if not quiet:
+            print "Branch spec file for branch '%s' does not exist." % branch
+            print "Currently defined branches are:"
+            rimenv.listBranches()
+        return False
+    return True
+
+#
+# get a list of all versions of a scs aprt from one 
+# found in a reference branch spec
+#
+def getSubVersion(scs, reference):
+    versions={}
+    for bk in conf.branches:
+        branch=conf.branches[bk]
+        if bk != reference.name:
+            for bscs in branch.scs:
+                version=branch.scs[bscs]
+                if bscs==scs.name and not version in versions:
+                    versions[version]=(scs.Url(version))
+    return versions
+#
+# get a list of all versions of a scs aprt from one 
+# found in a reference branch spec
+#
+def getSubRefs(scs, reference):
+    versions={}
+    refs=0
+    for bk in conf.branches:
+        branch=conf.branches[bk]
+        if bk != reference.name:
+            for bscs in branch.scs:
+                version=branch.scs[bscs]
+                if bscs==scs.name:
+                    version=branch.scs[bscs]
+                    if version == reference.scs[bscs]:
+                        refs+=1
+    return refs
+#
+# Display a list of current versions defined in the branch files for a scs.
+# Then ask what version should be the parent of the new one
+#
+def askForParent(newBranch, scs, newScsBranch):
+    print "Branch '%s%s' does not exists for source tree '%s'" % (scs.scs.prefix, newScsBranch, scs.name)
+    print "Please select which branch to create it from :"
+    versions=getSubList(scs,newScsBranch )
+    #
+    if not len(versions):
+        print "No versions found for branch '%s' in '%s'" % (newScsBranch, scs.name)
+        return ""
+    
+    choices=[k for k in versions ]
+    # loop asking
+    while True:
+        for idx in range(0, len(choices)):
+            print "     [%2d] %s" % (idx+1, versions[choices[idx-1]])
+        print "enter 'Q' to abort."
+        try:
+            choice = raw_input("Make a selection from the above list: ")
+        except:
+            print
+            sys.exit(1)
+        if choice.lower() == 'q':
+            return ""
+        idx=int(choice)
+        if idx > 0 or idx <= len(choices):
+            return choices[idx-1]
+
+# remove any branches we have just created (cleanup a partial branch creation)
+#
+def unCreate(scs, created):
+    for scs in created:
+        if not scs.RmBranch(newBranch):
+            print "Error: could not un-create partially created branch!"
+    return False
+ 
+#
+# Create a branch from another one
+# That is the only way to create a new branch.
+#
+def createBranch(newBranch):
+
+    # check if the parent can be found
+    if not chkBranch(newBranch): return False
+
+    created=[]
+    branch=conf.branches[newBranch]
+    bsfile="%s/branches/%s" % (os.path.dirname(__file__), branch.filename)
+    print "Scanning sub branches from branch spec %s:" % bsfile
+    print "== Content =="
+    print "%s" % open(bsfile, "r").read()
+    print "============="
+    msg=branch.desc
+    # Go through each source and call the 'mkbranch' hook
+    for scsname in branch.scs:
+        
+        version=branch.scs[scsname]
+        if not conf.rim.scs.has_key(scsname):
+            print "Invalid scs name found for branch %s" % scsname
+            sys.exit(1)
+        scs=scsOps.ScsOps(conf, conf.rim.scs[scsname])
+        # check that the server for this scs is available
+        if not scs.ChkServer(version):
+            print "Server %s for scs %s not available - aborting" % (scs.repo.server, scs.scs.name)
+            return unCreate(scs,created)
+
+        # check if this branch already exist for this scs
+        if scs.ChkBranch(version):
+            print "Branch %s already exists for scs '%s', skipping..." % (version, scsname)
+            continue
+        # time to ask user for parent branch to use for this new branch
+        parentBranch=askForParent(branch, scs, version)
+        if not len(parentBranch) : 
+            return unCreate(scs, created)
+        if not scs.MkBranch(version, parentBranch, msg): 
+            return unCreate(scs, created)
+        else:
+            created.append(scs)
+    
+    # all good - create the actual branch file
+    if not recordBranch(branch, msg, bsfile):
+        return unCreate(scs, created)
+    print "New branch spec %s successfully created" % branch.filename
+    return True
+
+#
+# Delete a branch
+#
+def deleteBranch(BsName):
+
+    # check if the parent can be found
+    if not chkBranch(BsName): return False
+    branch=conf.branches[BsName]
+    bsfile="%s/branches/%s" % (os.path.dirname(__file__), branch.filename)
+    
+    for scsname in branch.scs:
+        version=branch.scs[scsname]
+        scs=scsOps.ScsOps(conf, conf.rim.scs[scsname])
+        refs=getSubRefs(scs, branch)
+        if refs == 0:
+            print "Removal of branch %s" % branch
+            if not scs.RmBranch(branch, "Removal of branch %s" % branch): return False
+        else:
+            print "%d more references to '%s_%s', skipping..." % (refs, scsname, branch.scs[scsname])
+        
+    # all good - create the actual branch file
+    eraseBranch(branch, bsfile)
+    
+    return True
+
+#
+# Set the context to a specific branch
+# If we do not find it, we ask before checking it out.
+#
+
+try:
+    optlist, args = getopt.getopt(sys.argv[1:], 'c:d:m:lp:vs:')
+except:
+    usage()
+
+if len(optlist):
+    for opt, arg in optlist:
+        if opt == '-c':
+            newBranch=arg
+            continue
+        elif opt ==  '-d':
+            if len(args): usage()
+            continue
+        elif opt ==  '-p':
+            print "env product = %s" % arg
+            os.putenv("RIM_PRODUCT", arg)
+            continue
+        elif opt ==  '-v':
+            verbose=True
+        elif opt ==  '-l':
+            continue
+        elif opt ==  '-s':
+            continue
+else:
+    usage()
+
+for opt, arg in optlist:
+    if opt == '-c':
+        createBranch(newBranch)
+    elif opt ==  '-d':
+        deleteBranch(arg)
+    elif opt ==  '-l':
+        rimenv.listBranches(details=verbose, args=args)
+    elif opt ==  '-s':
+        print conf.branches[os.getenv('RIM_BRANCH')].scs[arg]
+            
+sys.exit(0)

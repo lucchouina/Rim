@@ -1,0 +1,1 @@
+/usr/share/pyshared/configglue/attributed.py

@@ -1,0 +1,185 @@
+#!/usr/bin/env python
+"""
+    Purpose of this command is to instanciate a view of a specific branch
+    for a specific product.
+
+    Basically, it checks out the components for the defined product.
+    All components source is kept under $RIM_WORKSPACE/views/$VIEWNAME/
+    
+    The script will start a shell with the proper environment.
+"""
+import os, sys
+import getopt
+import glob
+import subprocess
+import imp
+from string import Template
+import xml.dom.minidom
+import Rim
+import RimApp
+from SCons import Environment
+env=Environment.Environment()
+env.vars={}
+rim=Rim.Rim(env, Rim.Rim.Shared);
+
+# read in the entire configuration for that app and site
+appFile="%s/App.xml" % os.path.dirname(__file__)
+appNode=xml.dom.minidom.parse(appFile).getElementsByTagName('application')[0]
+conf=RimApp.RimApp(appNode, rim, quiet=1)
+conf.cspecs=conf.rim.cspecs
+
+prodname=os.getenv("RIM_PRODUCT")
+if prodname not in conf.products:
+    out("Target '%s' not found in target list (run rimtarget?)." % prodname)
+    sys.exit(1)
+    
+product=conf.products[prodname]
+#
+# Perform either of 'checkout', 'update', 'clean' or 'switch' on all
+# subtress associated with a component
+#
+def doCompOps(op, comp, compi, branch):
+    scs=conf.rim.scs[comp.root.scs]    
+    repo=conf.rim.repos[scs.repo]
+    scstype=conf.rim.scstypes[repo.type]
+    
+    # extract some of the variables that will populate the environment
+    branch="%s%s" % (scs.prefix, branch)
+    repo=rim.repos[scs.repo]
+    env={}
+    env["TYPE"]=repo.type;
+    env["ROOT"]=repo.root
+    env["SERVER"]=repo.server
+    env["CONTYPE"]=repo.contype
+    env["PORT"]=repo.port
+    env["BRANCH"]="%s%s" % (scs.prefix, branch)
+    #
+    # Each component has a component root
+    # If the scs type supports subtree checkouts, we can checkout the
+    # the component root's rim.py file and extract a sourceTress[] array 
+    # which gives a list of relatiove directories to be checked out.
+    # This is optional and if not found, we need to checkout this entire 
+    # component root.
+    #
+    subtrees={}
+    if scstype.subtrees:
+        # try to get a rim.py
+        prefix=comp.root.prefix
+        env["SRC"]=prefix
+        env["DST"]="%s/%s/%s" % (mkSroot(branch),  scs.name, prefix)
+        env["OPTIONS"]="--depth=empty"
+        scsOp('checkout', repo, env)
+        env["OPTIONS"]=""
+        env["TARGET"]="rim.py"
+        scsOp('update', repo, env)
+        dirList=[ prefix ]
+        # did we get one?
+        rimFile="%s/rim.py" % env["DST"]
+        if os.path.isfile(rimFile):
+            def MyImport(e):
+                return True
+            import __builtin__
+            __builtin__.Import=MyImport
+            rim.env['QUIET']=True
+            __builtin__.env=rim.env
+            # check if it defines a list of directories
+            mod=imp.load_source("rim", rimFile)
+            dirList=[]
+            if 'sourceTrees' in dir(mod):
+                if type(mod.sourceTrees) != type(list()):
+                    if comp.name in mod.sourceTrees:
+                        dirList=mod.sourceTrees[comp.name]
+                    else:
+                        print "Warning : no dir list found for component '%s' in '%s'" % (comp.name, rimfile)
+                else:
+                    dirList=mod.sourceTrees
+            if not len(dirList): disList=[ "." ]
+            for d in dirList:
+                subtrees["%s/%s" % (prefix, d)]="%s/%s" % (env["DST"], d)
+        else:
+            # no rim.py, check out the entire thing
+            env["OPTIONS"]="--depth=infinity"
+            scsOp('checkout', repo, env)
+            subtrees[prefix]=env["DST"]
+        for src in subtrees:
+            dst=subtrees[src]
+            env["SRC"]=src
+            env["DST"]=dst
+            env["OPTIONS"]="--depth=infinity"
+            scsOp('checkout', repo, env)
+            
+    else:
+        # all of it
+        subtrees["."]="%s/%s" % (mkSroot(branch),  scs.name)
+#
+# Component callback for checkout
+#
+def checkItOut(comp, compi, branch):
+    scs=conf.rim.scs[comp.root.scs]    
+    out("Checking out %-20s - to [%s/%s/%s]" % (comp.name, mkSroot(branch), scs.name, comp.root.prefix))
+    scs=conf.rim.scs[comp.root.scs]
+    cdir="%s/%s" % (mkSroot(branch), scs.prefix)
+    # create the component root
+    try: os.mkdir(cdir) 
+    except: pass
+    return doCompOps('checkout', comp, compi, branch)   
+       
+    
+
+#
+# loop over all components dereived from amfnode-> service -> components
+# while calling back to caller supplied function
+#
+def forAllComps(product, callback, branch):
+    nodes=product.nodes
+    for nodeK in nodes:
+        node=nodes[nodeK]
+        compis=nodes[nodeK].compis
+        for compK in compis:
+            compi=compis[compK]
+            compname=compi.name
+            comp=conf.components[compname]
+            callback(comp, compi, branch)
+#
+# check if a branch root is available locally and create it if not
+# asking user. This means checking out all of the components
+# for the associated product.
+#
+# So - better ask....
+#
+def chkSroot(branch, forced=False):
+    sroot=mkSroot(branch)
+    if not os.path.isdir(sroot):
+        out("Local copy of '%s' not found." % branch)
+        if forced or not yn_choice("Would you like to create it?", default="n"):
+            # create the branch root
+            try: os.mkdir(sroot) 
+            except: pass
+            return forAllComps(product, checkItOut, branch)
+        return False
+    return True
+
+#
+# Generate the environment commands needed for work inside a branch
+#          
+def setBranchEnv(branch, forced=False):
+    if chkBranch(branch):
+        # check that we can find a local copy of this branch
+        if chkSroot(branch, forced=forced):
+            sroot=mkSroot(branch)
+
+#
+# Create a branch from another one
+# That is the only way to create anew branch.
+#
+def createBranch(newBranch, parentBranch):
+
+    # check if the parent can be found
+    if not chkBranch(parentBranch): return False
+
+    # make sure the new one does not exists
+    if chkBranch(newBranch, True):
+        out("Branch '%s' already exists." % newBranch)
+        return False
+        
+    # Go through each components and call the 'mkbranch' hook

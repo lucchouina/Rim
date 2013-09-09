@@ -1,0 +1,65 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          kexec
+# Required-Start:    procps
+# Required-Stop:
+# Default-Start:     1 3 5 8
+# Default-Stop:
+# Short-Description: handle kexec install
+### END INIT INFO
+
+umask 022
+
+if test -f /etc/default/vmcores; then
+    . /etc/default/vmcores
+fi
+
+. /lib/lsb/init-functions
+
+lgfile="/etc/logrotate.d/vmcores"
+
+startit()
+{
+    if [ ! -f $lgfile ]
+    then
+        echo "$0 : Missing log rotation config file for vmcores '$lgfile'"
+        exit 1
+    fi
+    target="`head -1 $lgfile`"
+    vmcoreDir=`dirname $target`
+    filename=`basename $target`
+    mkdir -p $vmcoreDir
+    logrotate -f /etc/logrotate.d/vmcores
+    for cmd in `cat /proc/cmdline`; do case $cmd in *=*) eval $cmd ;; esac; done
+    cd /soft/$version
+    args=`(cat /proc/cmdline; echo " ") | awk '
+        /init=/             { printf("init=/sbin/kdump "); next; }
+        /crashkernel=/      { next; }
+        /quiet/             { next; }
+        { printf("%s ", $1); }
+        ' RS=" "`
+    kexec -p kernel --initrd=initrd.fs  --append="$args"
+}
+
+export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"q
+
+case "$1" in
+  restart|start)
+	log_daemon_msg "Starting kexec" ""
+	if startit 
+    then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+	;;
+  stop)
+   #no-op
+   ;;
+  *)
+	log_action_msg "Usage: $0 {start|restart}"
+	exit 1
+    ;;
+esac
+
+exit 0

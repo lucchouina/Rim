@@ -1,0 +1,6 @@
+#
+# This is the Smlc private configuration file
+# This configuration will be preserved accross installation
+#
+# Enable the iproxy service for simulation support
+#IPROXY=1

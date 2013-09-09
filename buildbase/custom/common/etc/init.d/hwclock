@@ -1,0 +1,28 @@
+### BEGIN INIT INFO
+# Provides:          hwclock
+# Required-Start:
+# Required-Stop:
+# Default-Start:     0 6
+# Default-Stop:
+# Short-Description: Save date to hardware clock during reboot ot halt
+### END INIT INFO
+
+umask 022
+. /lib/lsb/init-functions
+
+export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"q
+
+case "$1" in
+  start)
+	log_daemon_msg "Saving date/time to hardware clock" ""
+    hwclock --rtc=/dev/rtc0 --systohc --utc
+	;;
+  stop)
+	# noop
+	;;
+  *)
+	log_action_msg "Usage: $0 {start}"
+	exit 1
+esac
+
+exit 0

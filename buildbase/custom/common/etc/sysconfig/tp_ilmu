@@ -1,0 +1,56 @@
+#
+# This is the iLmu private configuration file
+# This configuration will be preserved accross installation
+#
+
+#
+# "LOGICAL_ADDR" -- Enable autoconfiguration
+# This is the logial ip address of the associated smlc cluster
+# The iproxy deamon must be running on the remote smlcs 
+# Configucation will be pushed automatically from iproxy to 
+# ilmu on smlc configuration cycle.
+#
+# Default : standalone mode where one can use the CONFIG_FILE option
+#           to specify a initial config file ex: lastConfig.xml
+#
+    #LOGICAL_ADDR=192.168.192.168
+
+#
+# "MAX_LMUS" -- Maximum number of LMUs to run.
+# Ilmu will not instanciate more then that number of 
+#
+# Default: 200 
+#
+    #MAX_LMUS=10
+
+#
+# "CLOCKING" - Frame number to use for tdm clocking
+# Only needed for TDM and only if all the LMUs of the first frame
+# are unpopulated.
+#
+# Default :1
+#
+    #CLOCKING=1
+
+#
+# "CLI_PORT" - Cli port of iLmu controller 
+# This is the cli where iLmu can be commanded to do certain things
+# like powering up or down certain LMUs or turning debug on or off.
+#
+# default : 59999
+#
+# NOTE: this is a future feature. The CLI is mostly empty of commands
+# at this point in time.
+
+    #CLI_PORT=2221
+
+#
+# "CONFIG_FILE" - Pathname of the XML config file.
+# You can use this option when iproxy service is not available on the
+# smlc cluster. You can copy the /tpapp/smlc/config/lastConfig.xml file
+# directly from smlc to that pathname and point iLmu to it.
+#
+# Default: [none]
+
+    #CONFIG_FILE=/tpdata/ilmu/lastConfig.xml
+

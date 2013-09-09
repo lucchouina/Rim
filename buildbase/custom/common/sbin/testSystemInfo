@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+
+""" testSystemInfo
+
+Exercise the test hooks on the supplied configuration.
+This command can be used to run certain tests without actually saving to 
+persistant config. For exmaple backup test is preformed this way.
+
+"""
+
+import sys
+
+import simplejson
+
+from settings.system import *
+
+data = sys.stdin.readlines()
+
+#
+# convert from unicode to string
+#
+val = str(''.join(data))
+
+struct = simplejson.loads(val)
+
+keys=[]
+if len(sys.argv) > 1: keys=sys.argv[1:]
+else: keys=[]
+
+handlers, interests, old, schema = get_systeminfo(getkeys(struct))
+
+errors={}
+foundErrors=test(struct, schema['mapping'], handlers, "", errors)
+ 
+errors={ 'success': not foundErrors, 'errors' : errors }
+print simplejson.dumps(errors, sort_keys=True, indent=4)

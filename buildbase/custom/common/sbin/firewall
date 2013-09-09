@@ -1,0 +1,92 @@
+#! /bin/bash
+
+confile=/etc/firewall.conf
+
+nosup()
+{
+    echo "$prog : command $1 not supported!"
+    exit 1
+}
+
+usage()
+{
+    echo "usage : "
+    echo "$prog allow port/proto,   example: ufw allow 5432/tcp"
+    echo "$prog deny port/proto,    example: ufw deny 5432/tcp"
+    echo "$prog stop,               stops firewall which opens all ports for business"
+    echo "$prog restart,            restart firewal (must be used after 'allow' or 'deny' commands" 
+    exit 1
+}
+
+replaceport() # [ accept/deny ] [ port spec ]
+{
+    # split proto/port here. default to tcp.
+    eval `echo $2 | awk -F/ '{if(NF==1) proto="tcp"; else proto=$2; port=$1;}END{printf("proto=%s\nport=%d\n",proto,port);}'`
+    case $proto in
+       tcp|udp) ;;
+       *) 
+       echo "Invalid port/protocol specified"
+       usage
+       ;;
+    esac
+    # remove any previous reference to that proto/port
+    sed -i -e "/$proto ${port}.*$/d" $confile
+    # add this new one
+    echo "$proto ${port} $1" >> $confile
+}
+
+fireup()
+{
+    iptables -F
+    iptables -A INPUT -i lo -j ACCEPT
+    iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    iptables -A INPUT -p tcp --dport ssh -j ACCEPT
+    iptables -A INPUT -p icmp -m icmp --icmp-type 8 -j ACCEPT
+    (
+    for file in $confile /etc/firewall.d/*
+    do
+        exec < $file
+        while read line
+        do
+            if [ "$line" ]
+            then
+                set $line
+                iptables -A INPUT -p $1 --dport $2 -j $3
+            fi
+        done
+    done
+    ) 2>/dev/null
+    iptables -A INPUT -i eth0 -j DROP
+}
+
+prog=$0
+[ $# == 0 ] && usage
+while [ $# != 0 ]
+do
+    case "$1" in
+    --force) ;;
+    --version) echo "Rim firewall frontend";;
+    allow)
+        shift;
+        replaceport ACCEPT $1
+    ;;
+    start|enable)
+        fireup
+    ;;
+    stop|disable)
+        iptables -F
+    ;;
+    deny)
+        shift
+        replaceport DROP $1
+    ;;
+    restart|reload)
+        fireup
+    ;;
+    default|reject|reset|show|status|delete)
+        nosup $1
+    ;;
+    esac
+    shift
+done
+exit 0

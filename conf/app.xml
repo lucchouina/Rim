@@ -1,0 +1,222 @@
+<?xml version='1.0' ?>
+<!-- Site information about source control etc.. -->
+<site>
+    <application name="rim" version="1.0">
+
+        <!-- Company -->
+        <var value="Rim" name="company"/>
+
+        <!-- Global compiler options -->
+        <var name="CCFLAGS"         value="-Wno-unused-variable -Wno-unused-value -g -ggdb" />
+        <var name="CXXFLAGS"        value="-Wno-deprecated" />
+
+        <!-- where to put the jre and jdk files on the targets -->
+        <var name="T_JavaRoot"   value="/usr/lib/jvm" />
+
+        <!-- Where to send the output of the context scripts on the target 
+             Output of the post-install, first-boot, pre-install, pre-reboot
+             will be sent to files named $context.out in the specified directory.
+        -->
+        <var name="traceDir"        value="/data/install"/>
+
+        <!-- User IDs and names we want to use -->
+        <!-- rimsupport -->
+        <var name="rimSupportUid"    value="1000" />
+        <var name="rimSupportGid"    value="1001" />
+        <var name="rimSupportName"   value="rimsupport" />
+        <!-- rimuser -->
+        <var name="rimUserUid"       value="1001" />
+        <var name="rimUserGid"       value="1002" />
+        <var name="rimUserName"      value="rimuser" />
+        <!-- admin -->
+        <var name="rimAdminUid"      value="1002" />
+        <var name="rimAdminGid"      value="${rimUserGid}" />
+        <var name="rimAdminName"     value="admin" />
+
+        <!-- Tomcat -->
+        <var name="tomcatUid"       value="1003" />
+        <var name="tomcatGid"       value="1003" />
+
+	    <!-- postgres -->
+        <var name="postgresUid" value="1100" />
+        <var name="postgresGid" value="1100" />
+        <var name="postgresUserName" value="postgres" />
+
+        <!-- Define all the individual components -->
+        <!--
+            Enumerate all of the components that make up the product.
+	        Components can supply executables, libraries and interface etc.
+            Each component root will have a rim direcory attached to with that will 
+            define the module(s) associated with this components in the form of
+            a rim.spec file.
+
+            Optionally, if the root of the component also includes an sconstruct file,
+            meaning that scons shoudl also participate in its building, then that file
+            will also be loaded (and any other files it chooses to load as well).
+        -->
+        <components>
+            <!-- Basic RIM component that are added to each services on the fly -->
+            <component name="RimBase">
+                <buildroot  scs="rim" prefix="buildbase" />
+            </component>
+            <component name="Imgd">
+                <buildroot  scs="rim" prefix="components/imgd" />
+            </component>
+            <component name="RimRoots">
+                <buildroot  scs="roots" prefix="" />
+            </component>
+            <component name="RimTools">
+                <buildroot  scs="tools" prefix="" />
+            </component>
+            <component name="rimOs">
+                <buildroot  scs="rim" prefix="components/rimos" />
+            </component>
+            <component name="Postgres-common">
+                <buildroot  scs="rim" prefix="components/postgresql/common" />
+            </component>
+            <component name="Lxc-0.8.0">
+                <buildroot  scs="rim" prefix="components/lxc/lxc-0.8.0" />
+            </component>
+            <component name="Postgres-9.2">
+                <buildroot scs="rim" prefix="components/postgresql/9.2" />
+            </component>
+            <component name="Jre-1.6">
+                <buildroot scs="rim" prefix="components/java/openjdk-6" />
+            </component>
+            <component name="JavaSE-6.31-Jdk">
+                <buildroot  scs="rim" prefix="components/java/jdk1.6.0_31" />
+            </component>
+            <component name="JavaSE-6.31-Jre">
+                <buildroot  scs="rim" prefix="components/java/jre1.6.0_31" />
+            </component>
+            <component name="Tomcat7">
+                <buildroot  scs="rim" prefix="components/tomcat/tomcat7" />
+            </component>
+            <component name="Rabbitmq2.8.1">
+                <buildroot scs="rim" prefix="components/RabbitMQ/2.8.1" />
+            </component>
+            <component name="BackupServer">
+                <buildroot  scs="rim" prefix="components/backup" />
+            </component>
+            <component name="BackupClient">
+                <buildroot scs="rim" prefix="components/backup" />
+            </component>
+            <component name="svnServer">
+                <buildroot scs="rim" prefix="components/svn" />
+            </component>
+             <component name="svnClient">
+                <buildroot scs="rim" prefix="components/svn" />
+            </component>
+            <component name="Builder">
+                <buildroot scs="rim" prefix="components/builder" />
+            </component>
+            <component name="prof">
+                <buildroot scs="rim" prefix="components/prof" />
+            </component>
+            <component name="Dev">
+                <buildroot scs="rim" prefix="components/dev" />
+            </component>
+            <component name="gitServer">
+                <buildroot  scs="rim" prefix="components/git" />
+            </component>
+            <component name="gitClient">
+                <buildroot  scs="rim" prefix="components/git" />
+            </component>
+            <component name="Jenkins">
+                <buildroot  scs="rim" prefix="components/jenkins" />
+            </component>
+            <component name="Maven2">
+                <buildroot  scs="rim" prefix="components/maven/2.2.1-2" />
+            </component>
+        </components>
+        <!--
+            Define the set of services
+        -->
+        <services>
+            <service name="Rim">
+                <component name="RimBase"/>
+                <component name="RimRoots"/>
+                <component name="RimTools"/>
+                <component name="prof"/>
+            </service>
+            <service name="Imgd">
+                <component name="Imgd"/>
+                <component name="rimOs"/>
+            </service>
+            <service name="GlobalContainer">
+                <component name="GlobalContainer"/>
+            </service>
+            <service name="gitServer">
+                <component name="gitServer"/>
+            </service>
+            <service name="scsClient">
+                <component name="gitClient"/>
+                <component name="svnClient"/>
+                <component name="rimOs"/>
+            </service>
+            <service name="Jenkins">
+                <var name="jenkinsHome"             value="/var/lib/jenkins" />
+                <var name="jenkinsTomcatVer"        value="7" />
+                <var name="jenkinsLoginname"        value="admin" />
+                <var name="jenkinsAdminPassword"    value="imhere4u" />
+                <var name="tomcatRunTimeUserId"     value="${rimSupportUid}" />
+                <var name="tomcatRunTimeGroupId"    value="${rimSupportGid}" />
+                <var name="tomcatPort"              value="8080" />
+                <component name="rimOs"/>
+                <component name="Jenkins"/>
+                <component name="Tomcat7"/>
+                <component name="JavaSE-6.31-Jdk"/>
+                <component name="JavaSE-6.31-Jre"/>
+                <component name="svnClient"/>
+                <component name="gitClient"/>
+                <component name="Maven2"/>
+                <component name="Builder"/>
+                <component name="Dev"/>
+                <component name="BackupClient"/>
+            </service>
+            <service name="svnServer">
+                <component name="svnServer"/>
+            </service>
+            <service name="BackupServer">
+                <component name="rimOs"/>
+                <component name="BackupServer"/>
+            </service>
+            <service name="Containers">
+                <component name="Lxc-0.8.0"/>
+            </service>
+        </services>
+        <products>
+            <!--
+                The actual released product to be run in QA and Field 
+            -->
+            <product name="Jenkins" desc="Jenkins server">
+                <amfNode name="Jenkins" clm="Atom" distro="Ubuntu" distroVersion="lts10.04">
+                    <var name="bonjourInterfaces" value="eth0" />
+                    <var name="initmodePort" value="80" />
+                    <var name="appmodePort" value="80" />
+                    <service name="Jenkins"/>
+                    <service name="scsClient"/>
+                    <service name="Imgd"/>
+                </amfNode>
+            </product>
+            <product name="M1" desc="M1 arm base component">
+                <amfNode name="NetNode" clm="M1" distro="Fedora" distroVersion="15">
+                </amfNode>
+            </product>
+            <product name="scsServer" desc="A node that supplies git and svn services">
+                <amfNode name="scs" clm="Global" distro="Ubuntu" distroVersion="lts10.04">
+                    <service name="gitServer"/>
+                    <service name="svnServer"/>
+                </amfNode>
+            </product>
+            <product name="ImgServer" desc="Service that manages the bringup of node via network">
+                <amfNode name="ImgServer" clm="Container" distro="Ubuntu" distroVersion="lts10.04">
+                    <!--service name="svnServer"/-->
+                    <var name="initmodePort" value="80" />
+                    <var name="appmodePort" value="80" />
+                    <service name="Imgd"/>
+                </amfNode>
+            </product>
+        </products>
+    </application>
+</site>

@@ -1,0 +1,48 @@
+#!/usr/bin/env python
+#
+
+#
+# This script is used to order the restart of components based on restart
+# dependencies.
+#
+# Start/Stop are handled normally by initctl with no regards to dependencies.
+# Only Restart makes it here.
+#
+import os
+import sys
+import subprocess
+from rcEntries import *
+
+# Read current initlevel
+curInitLevel=open("/proc/1/cmdline", "r").readline().split("[")[1].split("]")[0]
+entries, deplist=getRcEntries(curInitLevel)
+
+script=sys.argv[1]
+action=sys.argv[2]
+actionList=[]
+
+if not entries.has_key(script):
+    print "Service not found '%s'.\n" % script
+    sys.exit(1)
+
+# we handle only restart for now
+
+entry=entries[script]
+
+def buildActionList(script):
+    actionList.append(script)
+    provided=entries[script][PROVIDES]
+    for key in deplist:
+        for restart in entries[key][RESTARTS]:
+            if restart in provided and key not in actionList:
+                buildActionList(key)
+
+def doAction(orderedList, action):
+    for script in orderedList:
+        os.system("/etc/init.d/%s %s" % (script, action))
+        
+buildActionList(script)
+
+# only restart for now, but still test for stop/start
+doAction(reversed(actionList), "stop")      
+doAction(actionList, "start")

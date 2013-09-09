@@ -1,0 +1,6 @@
+Run 'make' to copy the latest version of the configuration scripts to
+the $GLOBALROOT area for support of GLOBAL desktop development enrironment.
+This assumes you have a valid RIM environment, i.e. you have sourced a
+rimInit.sh and run riminit succesfully.
+
+   -Luc 

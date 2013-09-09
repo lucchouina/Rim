@@ -1,0 +1,6 @@
+#! /bin/bash
+#
+# Build an iso  
+#
+cd $RIM_WORKSPACE/$RIM_BRANCH/$RIM_PRODUCT
+makeiso 

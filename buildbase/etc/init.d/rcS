@@ -1,0 +1,4 @@
+#! /bin/bash
+mkdir -p /dev/pts
+mount -t devpts none /dev/pts
+mkdir -p /var/spool/cron

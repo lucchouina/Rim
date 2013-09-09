@@ -1,0 +1,1 @@
+/usr/share/pyshared/ubuntuone/storageprotocol/dircontent_pb2.py

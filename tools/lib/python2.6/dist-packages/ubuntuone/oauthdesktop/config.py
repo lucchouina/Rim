@@ -1,0 +1,1 @@
+/usr/share/pyshared/ubuntuone/oauthdesktop/config.py

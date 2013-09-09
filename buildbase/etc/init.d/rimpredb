@@ -1,0 +1,44 @@
+#! /bin/bash
+#
+# Sole purpose of this script is to enable actions on first boot
+# put prior to db being up and running.
+# Namely - database copy on the first time coming up to a a new version from a previous running one.
+### BEGIN INIT INFO
+# Provides:          rimpredb
+# Required-Start:    rimpostinstall
+# Required-Stop:
+# Default-Start:     3 5 8
+# Default-Stop:      0 1 3 6
+# Short-Description: Firstboot-predb functions
+# Description:       Performce any actions that are needed for starting the db
+### END INIT INFO
+#
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+. /lib/lsb/init-functions
+. /sbin/rimFuncs
+setNodeEnvironment
+
+cd /soft/$version
+
+
+if [ "$1" == start -a -f /firstboot ]
+then
+    log_action_msg "Firstboot-predb:"
+    #/bin/rm /firstboot -> init.d/rim will remove it later during the boot sequence
+    firstbootpredb
+fi
+
+case "$1" in
+  start)
+	;;
+  restart)
+	;;
+  stop)
+	;;
+  *)
+	echo "Usage: $0 start|stop|restart" >&2
+	exit 3
+	;;
+esac
+exit 0

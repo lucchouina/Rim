@@ -1,0 +1,89 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          ssh
+# Required-Start:    net
+# Required-Stop:
+# Default-Start:     3 5 8
+# Default-Stop:      0 1 6
+# Short-Description: initmode web service
+# Description:       This service will start webServer on port 80
+### END INIT INFO
+
+umask 022
+
+if test -f /etc/default/ssh; then
+    . /etc/default/ssh
+fi
+
+. /lib/lsb/init-functions
+
+if [ -n "$2" ]; then
+    SSHD_OPTS="$SSHD_OPTS $2"
+fi
+
+export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
+
+case "$1" in
+  start)
+    rsaFile=/etc/ssh/ssh_host_rsa_key
+    dsaFile=/etc/ssh/ssh_host_dsa_key
+    [ -f $rsaFile ] || (
+    
+        echo -n "Generating RSA keys..."
+        ssh-keygen -t rsa -P "" -f $rsaFile 1>/dev/null 2>&1
+        echo "done."
+    
+    )
+    [ -f $dsaFile ] || (
+    
+        echo -n "Generating DSA keys..."
+        ssh-keygen -t dsa -P "" -f $dsaFile 1>/dev/null 2>&1
+        echo "done."
+    
+    )
+    chmod 0400 /etc/ssh/ssh_host_*_key
+	log_daemon_msg "Starting Secure Shell server" "sshd"
+	if start-stop-daemon --start --quiet --pidfile /var/run/sshd.pid --exec /usr/sbin/sshd -- $SSHD_OPTS; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+	;;
+  stop)
+	log_daemon_msg "Stopping Secure Shell server" "sshd"
+	if start-stop-daemon --stop --quiet --pidfile /var/run/sshd.pid; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+	;;
+
+  reload|force-reload)
+	log_daemon_msg "Reloading OpenBSD Secure Shell server's configuration" "sshd"
+	if start-stop-daemon --stop --signal 1 --quiet --oknodo --pidfile /var/run/sshd.pid --exec /usr/sbin/sshd; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+	;;
+
+  restart)
+	log_daemon_msg "Restarting OpenBSD Secure Shell server" "sshd"
+	start-stop-daemon --stop --quiet --oknodo --retry 30 --pidfile /var/run/sshd.pid
+	if start-stop-daemon --start --quiet --oknodo --pidfile /var/run/sshd.pid --exec /usr/sbin/sshd -- $SSHD_OPTS; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+	;;
+
+  status)
+	status_of_proc -p /var/run/sshd.pid /usr/sbin/sshd sshd && exit 0 || exit $?
+	;;
+
+  *)
+	log_action_msg "Usage: /etc/init.d/ssh {start|stop|reload|force-reload|restart|try-restart|status}"
+	exit 1
+esac
+
+exit 0

@@ -1,0 +1,15 @@
+#! /usr/bin/env /usr/bin/python
+import os 
+import sys
+import xml.dom.minidom
+if not os.environ.has_key('RIM_WORKSPACE'):
+    print "Please run rimstart first."
+    sys.exit(1)
+    
+fname="%s/%s.xml" % os.environ['RIM_WORKSPACE']
+
+appNode = xml.dom.minidom.parse(fname)
+prodNodes=appNode.getElementsByTagName('product')
+for prodNode in prodNodes:
+    pname=prodNode.getAttribute('name')
+    print "    %s" % pname

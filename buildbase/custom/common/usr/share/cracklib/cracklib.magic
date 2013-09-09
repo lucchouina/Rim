@@ -1,0 +1,5 @@
+# cracklib:  file (1) magic for cracklib v2.7
+0	lelong	0x70775631	Cracklib password index, little endian
+>4	lelong	>0		(%i words)
+0	belong	0x70775631	Cracklib password index, big endian
+>4	belong	>0		(%i words)

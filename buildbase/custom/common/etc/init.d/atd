@@ -1,0 +1,55 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          at
+# Required-Start:    procps
+# Required-Stop:
+# Default-Start:     3 5 8
+# Default-Stop:      0 1 6
+# Short-Description: batch support daemon
+### END INIT INFO
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+DAEMON=/usr/sbin/atd
+
+test -x $DAEMON  || exit 0
+
+
+[ -e /etc/default/atd ] && . /etc/default/atd
+
+NAME=atd
+
+DAEMON=/usr/sbin/atd
+
+# Get lsb functions
+. /lib/lsb/init-functions
+
+case "$1" in
+  start)
+    log_begin_msg "Starting atd daemon..."
+    start-stop-daemon --start -m --quiet --pidfile /var/run/$NAME.pid --exec $DAEMON -- $atd_options
+    log_end_msg $?
+    ;;
+
+  stop)
+    log_begin_msg "Stopping atd daemon..."
+    start-stop-daemon --stop --quiet --pidfile /var/run/$NAME.pid
+    log_end_msg $?
+    ;;
+
+  restart)
+    $0 stop
+    $0 start
+    ;;
+
+  status)
+    status_of_proc "$DAEMON" atd
+    ;;
+
+  *)
+    echo "Usage: /etc/init.d/watchdog {start|stop|restart|status}"
+    exit 1
+
+esac
+
+exit 0

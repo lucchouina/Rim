@@ -1,0 +1,9 @@
+#! /bin/bash
+#
+# This is a hook for keeping the /init startup script. Not to be confused with the
+# /bin/init and rc.d or upstart startups which are started by the /init script.
+#
+udevd --daemon
+sleep 2
+udevadm settle
+udevadm trigger

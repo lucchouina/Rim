@@ -1,0 +1,176 @@
+#!/bin/bash
+#
+# main installation script - called from init, or via support package on another system
+
+. ./rimFuncs
+
+#
+# must be root
+#
+if [ `id -u` != 0 ]
+then
+    echo "You must be root to run this command."
+    exit 1
+fi
+
+#
+# must be runing from a build artifact directory (a repository)
+#
+if [ ! -f ./bom.sh ] 
+then
+    echo "You need to run installRim from unpacked directory itself."
+    exit 1
+fi
+
+setNodeEnvironment
+
+# user can override node and variant for this install
+[ "$1" ] && rim_node=$1
+[ "$2" ] && rim_variant=$2
+
+echo "Checking prior versions and cleaning up."
+./rimboot -c 4
+echo "Cleanup check done."
+
+echo "Installation of $rim_node/$rim_variant version $rimBuildLabel started."
+export rim_node rim_variant
+
+#
+# if there is 
+#
+# make sure local media is setup and mounted.
+echo "Checking and setting up local secondary disk."
+./setUpDisk "$rimDiskNames" "$rimPartSizes" 
+
+#
+# check on that version - does it already exists here ?
+# If it does, we need to remove the software components of it.
+# The inodes will still exist until the next reboot of course.
+#
+if [ ! "$rimBuildLabel" ]
+then
+    echo "Build version not set!?!?"
+    exit 1
+fi
+[ -d /${rimPrivSoft} ] && (
+
+    echo "Previous installation of $rimBuildLabel found - moving it."
+
+    [ -d /${rimPrivSoft}.old ] && (
+        echo "Previous saved installation of $rimBuildLabel found - removing it."
+        /bin/rm -rf /${rimPrivSoft}.old
+    )
+    /bin/mv /${rimPrivSoft} /${rimPrivSoft}.old
+)
+
+mkdir -p /${rimPrivSoft}
+mkdir -p /${rimPrivData}
+#
+# install the modules and bom files 
+#
+installModules /${rimPrivSoft}
+#
+# create read-write cache
+#
+createRwCache /${rimPrivSoft}
+
+##################################
+# Mount new version including RW jail
+##################################
+echo -n "    Mounting new version..."
+(
+    cd /${rimPrivSoft}
+    ./mountVersion
+) 
+echo "done."
+function getFsInfo() # <mount point> -> device,type,options
+{
+    out="`cat /proc/mounts | awk '{if($2==mntpoint && $3==type ) {print; exit}}' mntpoint=$1 type=$2`"
+    if [ "$out" ]
+    then
+        set $out
+        device=$1
+        type=$3
+        options=$4
+        return 0
+    else
+        return 1
+    fi
+}
+#
+# chroot and execute post-install context scripts
+#
+cd /${rimPubSoft}/$rimBuildLabel/altroot
+getFsInfo /$PIVOT/${rimPubSoft} ext3 && mkdir -p ${rimPubSoft} && mount -t $type -o $options $device ${rimPubSoft}
+getFsInfo /$PIVOT/${rimPubData} ext3 && mkdir -p ${rimPubData} && mount -o $options $device ${rimPubData}
+getFsInfo /${rimPubSoft} ext3 && mkdir -p ${rimPubSoft} && mount -t $type -o $options $device ${rimPubSoft}
+getFsInfo /${rimPubData} ext3 && mkdir -p ${rimPubData} && mount -o $options $device ${rimPubData}
+# support chroot back to / from altroot
+if [ "$version" -a "$version" != "scratch" ]
+then
+    mkdir -p curroot
+    mount --bind / curroot
+    mkdir -p curroot/proc
+    mount -t proc proc curroot/proc
+fi
+#
+# Make copies of the current verions variables to alternate names
+#
+function mapVariables()
+{
+    # protect current environment
+    (
+        if [ "$version" -a "$version" != "scratch" ]
+        then
+            . rimFuncs
+            setNodeEnvironment
+            echo export curRimApplication=\"$rimApplication\"
+            echo export curRimApplicationVersion=\"$rimApplicationVersion\"
+            echo export curRimBuildLabel=\"$rimBuildLabel\"
+            echo export curRimBuildNumber=\"$rimBuildNumber\"
+            echo export curRimProduct=\"$rimProduct\"
+            echo export curRimBuildTime=\"$rimBuildTime\"
+            echo export curRimBuildUser=\"$rimBuildUser\"
+            echo export curRimBuildView=\"$rimBuildView\"
+            echo export curRimBuildRev=\"$rimBuildRev\"
+            echo export curRimRoot=/${rimPubSoft}/$version
+            echo export curRimPrivSoft=/${rimPubSoft}/$curRimBuildLabel
+            echo export curRimPrivData=/${rimPubData}/$curRimBuildLabel
+        fi
+    )
+}
+eval `mapVariables`
+export rimPrivSoft=${rimPubSoft}/$rimBuildLabel
+export rimPrivData=${rimPubData}/$rimBuildLabel
+export rimPubData=${rimPubData}
+echo "Running post install commands..."
+# remote the /dopost trigger
+rm -f /${rimPrivSoft}/altroot/dopost
+chroot /${rimPrivSoft}/altroot /sbin/doPostInstall $rimBuildLabel
+status=$?
+if [ $status == 0 ]
+then
+    echo "Post install sequence was successful."
+else
+    echo "*** Warning : Post install exited with code $status"
+fi
+if [ "$version" -a "$version" != "scratch" ]
+then
+    umount curroot/proc 2>/dev/null
+    rm -r curroot/proc 2>/dev/null
+    umount curroot 2>/dev/null 
+    rm -rf curroot 2>/dev/null
+fi
+umount ${rimPubSoft}
+umount ${rimPubData}
+cd ..
+(
+    cd /${rimPrivSoft}
+    ./unMountVersion
+) 
+echo "Updating boot loader table."
+/sbin/rimboot -n $rim_node -b $rimBuildLabel
+#
+# done
+echo "Installation of version $rimBuildLabel done."
+exit 0

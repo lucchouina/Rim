@@ -1,0 +1,73 @@
+#! /bin/bash
+action="`basename $0`"
+script=$1
+[ $action == service ] && action=$2
+
+disableFile=/etc/init.d/rc.disabled
+
+if [ ! -f /etc/init.d/$script ]
+then
+   echo "Service '$script' is not known."
+   exit 1
+fi
+
+# verify that the runlevel supports that service 
+runlevel="`cat /proc/1/cmdline | awk '{print substr($2, 2, 1);}'`"
+scriptlevels="`cat /etc/init.d/$script 2>/dev/null | grep Default-Start | grep $runlevel`"
+if [ "$action" == start  -a ! "$scriptlevels" ]
+then
+    echo "service '$script' is not supported in run level $runlevel"
+    exit 1
+else
+    case "$action" in
+        start)
+            if grep -w -q "$script" $disableFile 2>/dev/null
+            then
+                echo "service $script is disabled"
+                exit 1
+            fi
+            /etc/init.d/$script start
+            exit $?
+        ;;
+        stop)
+            /etc/init.d/$script stop
+            exit $?
+        ;;
+        enable)
+            if ! grep -w -q "$script" $disableFile 2>/dev/null
+            then
+                echo "service $script is already enabled"
+                exit 1
+            fi
+            sed -i -e "s/$script//g" "$disableFile"
+            exit 0
+        ;;
+        disable)
+            if grep -w -q "$script" $disableFile 2>/dev/null
+            then
+                echo "service $script is already disabled"
+                exit 1
+            fi
+            echo $script >> $disableFile
+            exit 0
+        ;;
+        status)
+            if grep -w -q "$script" $disableFile 2>/dev/null
+            then
+                echo "service $script is disabled"
+                exit 1
+            fi
+            /etc/init.d/$script status
+            exit $?
+        ;;
+        restart)
+            # we manage the restart through rcadm to honor the Restart-With clauses
+            rcadm $script $action
+            exit $?
+        ;;
+        *)
+            echo "Invalid service command '$action'"
+            exit 1
+    esac
+fi
+# not reached

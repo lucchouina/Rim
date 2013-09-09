@@ -1,0 +1,34 @@
+# /etc/default/ufw
+#
+# Set the default input policy to ACCEPT, ACCEPT_NO_TRACK, DROP, or REJECT.
+# ACCEPT enables connection tracking for NEW inbound packets on the INPUT
+# chain, whereas ACCEPT_NO_TRACK does not use connection tracking. Please note
+# that if you change this you will most likely want to adjust your rules.
+DEFAULT_INPUT_POLICY="DROP"
+
+# Set the default output policy to ACCEPT, ACCEPT_NO_TRACK, DROP, or REJECT.
+# ACCEPT enables connection tracking for NEW outbound packets on the OUTPUT
+# chain, whereas ACCEPT_NO_TRACK does not use connection tracking. Please note
+# that if you change this you will most likely want to adjust your rules.
+DEFAULT_OUTPUT_POLICY="ACCEPT"
+
+# Set the default forward policy to ACCEPT, DROP or REJECT.  Please note that
+# if you change this you will most likely want to adjust your rules
+DEFAULT_FORWARD_POLICY="DROP"
+
+# Set the default application policy to ACCEPT, DROP, REJECT or SKIP. Please
+# note that setting this to ACCEPT may be a security risk. See 'man ufw' for
+# details
+DEFAULT_APPLICATION_POLICY="SKIP"
+
+# By default, ufw only touches its own chains. Set this to 'yes' to have ufw
+# manage the built-in chains too. Warning: setting this to 'yes' will break
+# non-ufw managed firewall rules
+MANAGE_BUILTINS=no
+
+#
+# IPT backend
+#
+# only enable if using iptables backend
+IPT_SYSCTL=/etc/ufw/sysctl.conf
+

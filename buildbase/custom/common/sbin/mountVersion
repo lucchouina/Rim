@@ -1,0 +1,86 @@
+#! /bin/bash
+#
+# This function will mount the version found in the current directory
+#
+# check and/or create the writable fs ok lslslsl.
+#
+mydir=`pwd` # for support of absolute paths for loop mounts
+[ "$cleancache" ] && (
+
+    echo "*** Cleaning RW persistent cache ***"
+    /bin/rm -f rwjail.fs
+)
+mkdir -p rwjail
+/bin/touch /etc/mtab
+loopDev=`losetup -f`
+
+#
+# Source the bom and mount all fs specified for this node. rim_node is
+# passed in from kernel boot command.
+#
+. rimFuncs
+setNodeEnvironment
+
+if [ ! -f rwjail.fs ]
+then
+    # rim.xml:clmNode:geo:rwcache defines the rw cache size for a specific node.
+    # we default to 1 gig.
+    [ "$rwcache" ] || rwcache=1G
+    
+    dd if=/dev/zero bs=1 seek=$rwcache count=1 of=rwjail.fs 2>/dev/null 1>&2
+    losetup $loopDev $mydir/rwjail.fs
+    mkfs -t ext3 $loopDev 2>/dev/null 1>&2
+    # sleep for a little while, else the losetup -d will fail with 'device busy'
+    sleep 2
+else
+    # always check it - its small but critical
+    losetup $loopDev $mydir/rwjail.fs
+    fsck -a -t ext3 $loopDev 2>/dev/null 1>&2 || echo "**** RW jail fsck failed!"
+fi
+
+losetup -d $loopDev || (sleep 2 && losetup -d $loopDev )
+mount -n -o loop=$loopDev $mydir/rwjail.fs $mydir/rwjail || echo "**** Failed to mount RW jail!"
+
+dirs="$mydir/rwjail=rw"
+# 16 levels deep should be quite enough
+for l in 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1
+do
+    modIndex=0
+    while true
+    do
+        if [ "${module[$modIndex]}" ]
+        then
+            if [ "${level[$modIndex]}" == $l ]
+            then
+                fs=${module[$modIndex]}
+                mkdir -p $mydir/$fs
+                mount -n -o loop,ro $mydir/${fs}.fs $mydir/$fs || echo "Failed to mount $mydir/${fs}.fs!"
+                dirs="${dirs}:$mydir/$fs=ro"
+            fi
+        else
+            break
+        fi
+        modIndex=$(($modIndex+1))
+    done
+done
+#
+# use unionfs to make all this appear under a single root
+#
+mkdir -p $mydir/altroot
+# try both for now - depends on kernel setup...global is still unionfs, container is aufs
+if ! mount -n -t aufs -o dirs=$dirs aufs $mydir/altroot 2>/dev/null
+then
+    mount -n -t unionfs -o dirs=$dirs unionfs $mydir/altroot
+fi
+
+#
+# mount some of the ancillary directories to provide full
+# functionality in a chroot.
+#
+mkdir -p $mydir/altroot/proc
+mkdir -p $mydir/altroot/sys
+mount -n -tproc proc $mydir/altroot/proc
+mount -n -tsysfs sysfs $mydir/altroot/sys
+(cd / && tar cf - dev 2>/dev/null) | (cd $mydir/altroot && tar xf -)
+
+exit 0

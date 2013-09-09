@@ -1,0 +1,60 @@
+#!/usr/bin/env python
+
+""" get_systeminfo
+
+Code to retrieve system settings from the system.
+
+This returns a JSON object that is a nested structure
+
+"""
+
+import simplejson as json
+
+import sys
+import os
+import subprocess
+
+from settings.system import *
+
+if os.getuid() != 0:
+    print "You must be root to run this command"
+    sys.exit( 1 )
+
+keys=[]
+if len(sys.argv) > 1: keys=sys.argv[1:]
+else: keys=[]
+handlers, interests, root, schema = get_systeminfo(keys)
+
+# dump the current settings to a file
+tmpname="/tmp/settings"
+schemaFile="/tmp/schema"
+
+# write out the the schema
+f=open(schemaFile, "w")
+f.write(json.dumps(schema, sort_keys=True, indent=4));
+f.close()
+json.dump(root, open(tmpname, "w"), sort_keys=True, indent=4)
+
+while True:
+
+    os.system("jsonedit -s %s %s" % (schemaFile, tmpname))
+    cmd="cat %s | setSystemInfo" % (tmpname)
+    child = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+    statusJson=child.stdout.read()
+    status=json.loads(statusJson)
+    if status['success' ]: break
+    else:
+        os.system("clear")
+        printErrors(status['errors'])
+        print "(q) to quit, or any other keys to return to continue editing configuration...",
+        import sys, tty, termios
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+            if ch == 'q': break
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+sys.exit(0)

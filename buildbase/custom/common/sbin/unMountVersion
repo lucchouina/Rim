@@ -1,0 +1,37 @@
+#! /bin/bash
+#
+# This function will unmount the version found in the current directory
+# Works in tune with the mounVersion command.
+#
+mydir=`pwd` # for support of absolute paths for loop mounts
+#
+# umount in reverse order of the sequence used by the mountVersion...
+#
+umount $mydir/altroot/proc
+umount $mydir/altroot/sys
+umount $mydir/altroot
+#
+# Source the bom and mount all fs specified for this node. rim_node is
+# passed in from kernel boot command.
+#
+. rimFuncs
+setNodeEnvironment
+$rim_node 
+
+for cmd in `cat /proc/cmdline`; do eval $cmd 2>/dev/null; done
+# function of the bom that populates the node table is called by the node's name
+eval $rim_node 
+umount $mydir/rwjail
+modIndex=0
+while true
+do
+    if [ "${module[$modIndex]}" ]
+    then
+        fs=${module[$modIndex]}
+        umount $mydir/$fs
+    else
+        break
+    fi
+    modIndex=$(($modIndex+1))
+done
+exit 0

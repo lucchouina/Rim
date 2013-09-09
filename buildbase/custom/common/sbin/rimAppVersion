@@ -1,0 +1,5 @@
+#!/bin/bash
+. /sbin/rimFuncs
+setNodeEnvironment
+echo $rimApplicationVersion
+exit 0

@@ -1,0 +1,1 @@
+/usr/share/pyshared/twisted/names/resolve.py

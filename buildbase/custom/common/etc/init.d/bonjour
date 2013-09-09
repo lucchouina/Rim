@@ -1,0 +1,159 @@
+#!/bin/bash
+#
+# bonjour is driven by network, thus the X below to escape setUpRcLInks's radar
+### BEGIN INIT INFO
+# Provides:          bonjour 
+# Required-Start:    dbus net
+# Default-Start:     3
+# Restart-With:      net dbus
+# Short-Description: The bonjour service
+### END INIT INFO
+
+if [ `id -u` -ne 0 ]; then
+	echo "You need root privileges to run this script"
+	exit 1
+fi
+ 
+# Make sure tomcat is started with system locale
+if [ -r /etc/default/locale ]; then
+	. /etc/default/locale
+	export LANG
+fi
+
+. /lib/lsb/init-functions
+
+if [ -r /etc/default/rcS ]; then
+	. /etc/default/rcS
+fi
+
+function startit() # 1:<path> 2:<pid file> 3:<short name> 4:<args> 5:<start-top-daemon args>
+{
+	log_daemon_msg "Starting $3" ""
+    $6 start-stop-daemon --start -oknodo $5 --pidfile "$2" --exec "$1" -- $4
+    if [ "$?" -eq 0 ]
+    then
+        log_end_msg 0
+	else
+	    log_progress_msg "(already running)"
+		log_end_msg 1
+	fi
+}
+
+function stopit() # 1:<pid file> 2:<short name> 3:<start-top-daemon args>
+{
+	if [ -f "$1" ]; then 
+	    log_daemon_msg "Stopping $2" ""
+	    start-stop-daemon --stop $3 --pidfile "$1" --retry=TERM/5/KILL/5
+		rm -f "$1"
+	    if [ $? -eq 1 ]; then
+			log_progress_msg "$2 is not running but pid file exists, cleaning up"
+		    log_end_msg 1
+			return
+		elif [ $? -eq 3 ]; then
+			PID="`cat $1`"
+			log_failure_msg "Failed to stop $2 (pid $PID)"
+		    log_end_msg 1
+			return
+		fi
+        log_end_msg 0
+    fi
+}
+
+function statusit() # 1:<path> 2:<pid file> 3:<short name>
+{
+	start-stop-daemon --test --start --pidfile $2 --exec $1 >/dev/null 2>&1
+	if [ "$?" = "0" ]; then
+		if [ -f "$2" ]; then
+		    log_success_msg "$3 is not running, but pid file exists."
+			return
+		else
+		    log_success_msg "$3 is not running."
+			return
+		fi
+	else
+		log_success_msg "$3 is running with pid `cat $2`"
+	fi
+}
+
+
+case "$1" in
+  start)
+    if [ "$bonjourInterfaces" ]
+    then
+        if [ -f /etc/initmode ]
+	    then
+            startit /usr/sbin/avahi-daemon /var/run/avahi-daemon/pid avahi-deamon "-D" ""
+            sleep 1
+            mv /var/run/avahi-daemon/socket /var/run/avahi-daemon/socket.saved 2>/dev/null
+            startit /usr/sbin/avahi-autoipd  /var/run/avahi-autoipd.$bonjourInterfaces.pid avahi-autoipd "--force-bind -w -D $bonjourInterfaces"
+            line=`ip -d -f inet -o addr show dev $bonjourInterfaces:avahi scope link`
+            lAddr=`echo $line | awk -F/ '{print $1;}' | awk '{print $NF}'`
+            mAddr=`ip -d -f link -o addr show dev eth1 scope link 2>/dev/null| awk '{split($13, a, ":"); printf("%s:%s:%s\n", a[4], a[5], a[6]);}'`
+            [ ! "$mAddr" ] && mAddr=`ip -d -f link -o addr show dev $bonjourInterfaces scope link | awk '{split($13, a, ":"); printf("%s:%s:%s\n", a[4], a[5], a[6]);}'`
+            host=`hostname`
+            startit /usr/bin/avahi-publish-address /var/run/avahi-publish-address.pid avahi-publish-address "${host}.local ${lAddr}" "-b -m"
+            if [ -f /etc/initmode ]
+            then
+        	startit  /usr/bin/avahi-publish /var/run/avahi-publish-initmode.pid  "avahi-publish (initmode)" "-s `hostname`-Init($mAddr) _http._tcp 80" "-b -m"
+            else
+        	    for file in `ls /etc/bonjour.d/*.service 2>/dev/null`
+        	    do
+                        set `cat $file`
+                        name=$1
+                        type=$2
+                        port=$3
+                        startit  /usr/bin/avahi-publish /var/run/avahi-publish-$name.pid  "avahi-publish ($name)" "-s $name $type $port" "-b -m"
+        	    done
+            fi
+	    fi
+    fi
+	;;
+  stop)
+    if [ "$bonjourInterfaces" ]
+    then
+        stopit /var/run/avahi-publish-initmode.pid  "avahi-publish (initmode)" "-m"
+        for file in `ls /etc/bonjour.d/*.service 2>/dev/null`
+        do
+            set `cat $file`
+            name=$1
+            type=$2
+            port=$3
+            stopit /var/run/avahi-publish-$name.pid  "avahi-publish ($name)" "-m"
+        done
+        stopit /var/run/avahi-publish-address.pid avahi-publish-address "-m"
+        stopit /var/run/avahi-autoipd.$bonjourInterfaces.pid avahi-autoipd
+        stopit /var/run/avahi-daemon/pid avahi-daemon
+    fi
+	;;
+  status)
+     if [ "$bonjourInterfaces" ]
+     then
+        if [ -f /etc/initmode ]
+        then
+            statusit /usr/bin/avahi-publish /var/run/avahi-publish-initmode.pid  "avahi-publish (initmode)"
+        else
+            for file in /etc/bonjour.d/*.service
+            do
+                set `cat $file`
+                name=$1
+                type=$2
+                port=$3
+                statusit /usr/bin/avahi-publish /var/run/avahi-publish-$name.pid  "avahi-publish ($name)"
+            done
+        fi
+        statusit /usr/bin/avahi-publish-address /var/run/avahi-publish-address.pid avahi-publish-address
+        statusit /usr/sbin/avahi-autoipd /var/run/avahi-autoipd.$bonjourInterfaces.pid avahi-autoipd
+        statusit /usr/sbin/avahi-daemon /var/run/avahi-daemon/pid avahi-daemon
+     fi
+     ;;
+  restart|force-reload)
+    $0 stop
+	$0 start
+	;;
+  *)
+	log_success_msg "Usage: $0 {start|stop|restart|force-reload|status}"
+	exit 1
+	;;
+esac
+
+exit 0

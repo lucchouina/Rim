@@ -1,0 +1,154 @@
+#! /bin/bash
+### BEGIN INIT INFO
+# Provides:          net network
+# Required-Start:    procps
+# Required-Stop:
+# Default-Start:     3 5 8
+# Default-Stop:      0 1 6
+# Short-Description: fire up the network interfaces
+### END INIT INFO
+. /lib/lsb/init-functions
+
+findint()
+{
+    cat /etc/network/interfaces | \
+        awk '
+           { 
+                if($1=="iface") {
+                    if($2==interface) {
+                        addrtype=$4;
+                        doit=1;
+                    }
+                    else doit=0;
+                }
+                else if(doit && $1=="address") address=$2;
+                else if(doit && $1=="netmask") netmask=$2;
+                else if(doit && $1=="gateway") gw=$2;
+           }
+           END {
+                printf("INTERFACE=%s\n", interface);
+                printf("ADDRTYPE=%s\n", addrtype);
+                printf("ADDRESS=%s\n", address);
+                printf("NETMASK=%s\n", netmask);
+                printf("GW=%s\n", gw);
+                split(interface,a,":");
+                printf("DEVICE=%s\n", a[1]);
+           }' interface=$1
+}
+
+stopdhcp()
+{
+    pid=`cat /var/run/dhclient.$1.pid 2>/dev/null`
+    [ "$pid" ] && kill -0 $pid 2> /dev/null && kill $pid
+}
+
+startLo() # ifname 
+{
+    eval `findint $1`
+    if [ "$ADDRTYPE" == loopback ]
+    then
+        ifconfig $1 up
+    fi
+}
+startDhcp()
+{   
+    eval `findint $1`
+    if [ "$ADDRTYPE" == dhcp ]
+    then
+        dhclient -pf /var/run/dhclient.$INTERFACE.pid $INTERFACE
+    fi
+}
+startStatic()
+{
+    eval `findint $1`
+    if [ "$ADDRTYPE" == static ]
+    then
+        #
+        # if there is already a gateway on that interface (acquired via dhcp)
+        # we trust it above the local static defition (which is really the out-of-the-box
+        # configuration anyway).
+        #
+        dhcpGw=`netstat -rn | grep $DEVICE | awk '{if($1=="0.0.0.0") print $2;}'`
+        if [ ! "$dhcpGw" ]
+        then
+            ifconfig $1 $ADDRESS netmask $NETMASK up
+            stopdhcp $INTERFACE
+            if [ "$GW" ]
+            then
+                if [ -f /etc/initmode ] 
+                then
+                    # see if we can ping the gw from here
+                    echo -n "Trying gateway..."
+                    sleep 5
+                    if ping -c 2 -t 5 -w 10 $GW 1>/dev/null 2>&1
+                    then
+                        echo "ok."
+                        route add default gw $GW
+                    else
+                        echo "not responding - using interface."
+                        # forget the gw and send everything to the interface
+                        route add default $INTERFACE
+                    fi
+                else
+                    route add default gw $GW
+                fi
+            fi
+        else
+            # still check if our static is on the same subnet as what we got from dhcp
+            netMask="`ifconfig $DEVICE | grep Mask | awk -F: '{print $NF}'`"
+            dhcpBcast="`ipcalc $dhcpGw/$netMask | grep Broadcast: | awk '{print $2}'`"
+            staticBcast="`ipcalc $ADDRESS/$netMask | grep Broadcast: | awk '{print $2}'`"
+            if [ "$dhcpBcast" == "$staticBcast" ]
+            then
+                ifconfig $1 $ADDRESS netmask $netMask up
+            fi
+        fi
+    fi
+}
+
+stopit() # ifname 
+{
+    ifconfig $1 0.0.0.0 down 2>/dev/null
+    stopdhcp $1
+}
+
+doall()
+{
+    for int in `grep iface /etc/network/interfaces  | awk '{print $2}' | sort`
+    do
+        $1 $int
+    done
+}
+
+doallactive()
+{
+    for int in `ifconfig -a -s  | tail -n +2 | awk '{print $1}' | sort`
+    do
+        $1 $int
+    done
+}
+
+case "$1" in
+  start)
+	log_begin_msg "Starting network interfaces" ""
+    # make dns config work same as all others (setup ..., then, activation ...) this is the activation
+    [ -f /etc/resolv.conf.new ] && mv /etc/resolv.conf.new /etc/resolv.conf
+    mkdir -p /var/run/network
+    doall startLo && doall startDhcp && doall startStatic
+    log_end_msg $?
+	;;
+  stop)
+	log_begin_msg "Stopping network interfaces" ""
+    doallactive stopit
+    rm -f /var/run/network/ifstate
+    log_end_msg $?
+	;;
+  restart)
+    service network restart
+    ;;
+  *)
+	log_action_msg "Usage: /etc/init.d/network {start|stop|restart}"
+	exit 1
+esac
+
+exit 0

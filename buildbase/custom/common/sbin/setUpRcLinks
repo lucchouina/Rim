@@ -1,0 +1,70 @@
+#!/usr/bin/env python
+#
+import os
+import sys
+import subprocess
+from rcEntries import *
+#
+#
+# This script is ran on new installs or upgrades and creates all of the
+# symbolic links that are needed for system bringup by calling update-rc.d 
+# over all init script until all dependencies are resolved.
+#
+
+#
+# We have levels 0 1 3 5 6 and need to create valid transitions from all of them
+#
+transitions=[ 
+    '05',
+    '03', 
+    '01', 
+    '08', 
+    '10', 
+    '13', 
+    '15', 
+    '16', 
+    '18', 
+    '31', 
+    '30', 
+    '35', 
+    '36', 
+    '38', 
+    '53', 
+    '51', 
+    '50', 
+    '56', 
+    '58',
+    '80', 
+    '81', 
+    '83', 
+    '85',
+    '86'
+]
+path="/etc/init.d"
+
+#
+# make a list of all scripts in each levels in order of their dependencies
+#
+for trans in transitions:
+    Kcount=0
+    Scount=0
+    frm=trans[0]
+    to=trans[1]
+    toEntries, toDepList=getRcEntries(to, path)
+    frmEntries, frmDepList=getRcEntries(frm, path)
+    os.system("rm -rf /etc/rc%s%s.d && mkdir -p /etc/rc%s%s.d" % (frm, to, frm, to))
+    # what to we need to kill (reverse scan)
+    for entry in reversed(frmDepList):
+        if entry not in toDepList:
+            cmd="ln -s ../init.d/%s /etc/rc%s%s.d/K%02d%s" % (entry, frm, to, Kcount, entry)
+            os.system(cmd)
+            Kcount+=1
+    
+    # what to we need to start
+    for entry in toDepList:
+        if entry not in frmDepList:
+            cmd="ln -s ../init.d/%s /etc/rc%s%s.d/S%02d%s" % (entry, frm, to, Scount, entry)
+            os.system(cmd)
+            Scount+=1
+
+sys.exit(0)

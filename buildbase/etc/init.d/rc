@@ -1,0 +1,100 @@
+#! /bin/bash
+#
+# rc
+#
+# Starts/stops services on runlevel changes.
+#
+# Optimization: A start script is not run when the service was already
+# configured to run in the previous runlevel.  A stop script is not run
+# when the the service was already configured not to run in the previous
+# runlevel.
+#
+# Authors:
+# 	Miquel van Smoorenburg <miquels@cistron.nl>
+# 	Bruce Perens <Bruce@Pixar.com>
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
+# Make sure the name survive changing the argument list
+scriptname="$0"
+
+umask 022
+
+ulimit -c unlimited
+
+on_exit() {
+	echo "error: '$scriptname' exited outside the expected code flow."
+}
+trap on_exit EXIT # Enable emergency handler
+
+# Ignore CTRL-C only in this shell, so we can interrupt subprocesses.
+trap ":" INT QUIT TSTP
+
+# Set onlcr to avoid staircase effect.
+stty onlcr 0>&1
+
+# Now find out what the current and what the previous runlevel are.
+
+runlevel=$RUNLEVEL
+# Get first argument. Set new runlevel to this argument.
+[ "$1" != "" ] && runlevel=$1
+if [ "$runlevel" = "" ]
+then
+	echo "Usage: $scriptname <runlevel>" >&2
+	exit 1
+fi
+previous=$PREVLEVEL
+[ "$previous" = "N" ] && previous=0
+
+export runlevel previous
+
+if [ -f /lib/lsb/init-functions ] ; then
+	. /lib/lsb/init-functions
+else
+	log_action_msg() { echo $@; }
+	log_failure_msg() { echo $@; }
+	log_warning_msg() { echo $@; }
+fi
+
+#
+# Always recreate the rc links.
+#
+rm -rf /etc/rc??.d
+setUpRcLinks
+
+disableFile=/etc/init.d/rc.disabled
+
+function startStop()
+{
+    link="`readlink $1`"
+    name="`basename $link`"
+    service $name $2
+}
+
+# Is there an rc directory for this new runlevel?
+dir=/etc/rc$previous$runlevel.d
+echo $previous > /__curlevel__
+if [ -d $dir ]
+then
+    # Run all scripts with the same level in parallel
+    CURLEVEL=""
+    list="`ls $dir/K* 2>/dev/null`"
+    for s in $list
+    do
+        startStop $s stop
+    done
+    list="`ls $dir/S* 2>/dev/null`"
+    for s in $list
+    do
+        startStop $s start
+        # each scripts get the opportunity to influence the environment of the
+        # downstream scripts
+        [ -f /__setenv__ ] && . /__setenv__ && rm -f /__setenv__
+    done
+    echo $runlevel > /__curlevel__
+    echo $previous.$runlevel > /__transition__
+fi
+trap - EXIT # Disable emergency handler
+
+exit 0

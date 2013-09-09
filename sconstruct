@@ -1,0 +1,27 @@
+import os
+import glob
+import xml.dom.minidom
+
+#!/usr/bin/env python
+
+import Rim
+import RimApp
+import RimCore
+
+from SCons import Environment
+env=Environment.Environment()
+env.vars={}
+
+rim=Rim.Rim(env, Rim.Rim.Shared);
+rim.env.SetOption('warn', 'no-Duplicate-Environment')
+rim.addCppFlags("-DRIM")
+
+Export('env')
+
+# read in the entire configuration for that app and site
+appFile="%s/scripts/App.xml" % rim.myDir()
+appNode=xml.dom.minidom.parse(appFile).getElementsByTagName('application')[0]
+app=RimApp.RimApp(appNode, rim, quiet=1)
+
+print "Building App %s" % app.name
+app.buildIt()

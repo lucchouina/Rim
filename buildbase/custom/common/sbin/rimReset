@@ -1,0 +1,113 @@
+#!/bin/bash
+#
+# rimReset - reset current version to initial state
+#
+
+# for a Rim platform, this is achieved with these steps:
+#
+# 1) Make sure we are root (we will be modifying some links and key files)
+# 2) Move the rw cache to a new name
+#    This will remove any modifications to any of the files that happened since
+#    the first boot of the the current version
+# 3) create a new empty cache which will expose the firstboot file at the root
+# 4) touch the "reset" file at the root as well 
+#    This will force a run of the post-install and post-install-predb phases
+# 5) mv /data/<version> to /data/<version>.removed
+#    Note: files cannot be removed. They must br mv'ed.
+# 6) on the way up remove the old cache and old data
+# 7) rerun the post-install with variable $rimReset defined so that script can,
+#    if they need to, act differently and clear additional things.
+#    But they should not have too. All post-install scripts should expect to see old data
+#    in the global data area if we are doign a reset, and either clear it or use it.
+#
+
+if [ "`id -u`" != 0 ]
+then
+    echo "You must be root to run this command."
+    exit 1
+fi
+
+echo "Reverting to factory state..."
+#
+#
+# Send eveything below to a script which /etc/init.d/single will be looking for
+# and executing once single user mode has been reached.
+#
+cat << 'EOT' > /data/tmp/reset.cmd
+
+echo -n "Reverting to factory state..."
+
+export PATH="/bin:/sbin:/usr/bin:/usr/sbin"
+
+. /sbin/rimFuncs
+getBootOptions
+
+if [ ! "$version" ]
+then
+    echo "Cannot figure out what version you are running??"
+    exit 1
+fi
+
+# set the variables for this build and node
+setNodeEnvironment
+
+#
+# get cache size
+#
+cd /$rimPrivSoft
+rwcache=rwjail.fs
+rwsize=`stat -c '%s' $rwcache`
+
+#
+# move the active rw jail aside
+#
+mv $rwcache $rwcache.old
+#
+# create a new one
+#
+dd if=/dev/zero bs=1 seek=$rwsize count=1 of=$rwcache 2>/dev/null 1>&2
+#
+# make a file system in it and mount it
+#
+loopDev=`losetup -f`
+losetup $loopDev $rwcache
+mkfs -t ext3 $loopDev 2>/dev/null 1>&2
+losetup -d $loopDev
+#
+# mount it
+#
+mkdir -p /rw
+mount -n -o loop $rwcache /rw
+#
+# Save a copy of the config elements that are preserved
+# accross a reset
+#
+mkdir -p /rw/etc
+getSystemInfo IPInfo System DNS > /rw/etc/reset.cfg
+cp /etc/revert.cfg /rw/etc/revert.cfg 2>/dev/null
+#
+# done with priming the rw cache - unmount it.
+umount /rw
+#
+# give a chance to the module hooks to reset any data they need too
+#
+reset
+#
+# Make sure we start fresh with a brand new data partition.
+#
+umount /${rimPubData} && mkfs -t ext3 -I 128 /dev/md3 2>/dev/null 1>&2
+mount /dev/md3 /${rimPubData}
+mkdir /${rimPrivData}
+umount /${rimPubData}
+#
+# done
+echo -n "Done. Rebooting..."
+sleep 1
+reboot -f
+
+EOT
+
+#
+# Go to single use mode 
+#
+telinit 1

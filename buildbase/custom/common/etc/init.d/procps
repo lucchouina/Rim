@@ -1,0 +1,11 @@
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          procps
+# Required-Start:
+# Required-Stop:
+# Default-Start:     1 3 5 8
+# Default-Stop:
+# Short-Description: Setup sysctl 
+### END INIT INFO
+# containers share sysctl space with main host so, HANDS OFF!
+( cat /etc/sysctl.d/*.conf /etc/sysctl.conf | sysctl -q -p - ) 2>/dev/null

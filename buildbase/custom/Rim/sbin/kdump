@@ -1,0 +1,17 @@
+#! /bin/bash
+echo "Kdump init executing."
+echo -n "Mounting required filesystems..."
+(mkfs -t ext3 /dev/ram1 && mount /dev/ram1 /tmp) 1>/dev/null 2>&1
+mount -t proc /proc /proc
+mount -t sysfs /sys /sys
+mount /dev/md3 /data || mount /dev/sda3 /data
+vmcoreDir=/data/crash
+mkdir -p $vmcoreDir
+echo "done."
+echo -n "Saving vmcore file to $vmcoreDir/vmcore..."
+cp /proc/vmcore $vmcoreDir/vmcore
+umount /data
+echo "done."
+echo -n "Rebooting..."
+sync
+/sbin/reboot -f

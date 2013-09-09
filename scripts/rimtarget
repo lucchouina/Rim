@@ -1,0 +1,25 @@
+#! /usr/bin/env /usr/bin/python
+import os 
+import sys
+import xml.dom.minidom
+if not os.environ.has_key('RIM_WORKSPACE'):
+    print "Please run rimstart first."
+    sys.exit(1)
+
+mypath="/".join(os.path.abspath(__file__).split("/")[0:-1])
+fname="%s/App.xml" % mypath
+
+appNode = xml.dom.minidom.parse(fname)
+prodNodes=appNode.getElementsByTagName('product')
+products={}
+pkeys=[]
+for prodNode in prodNodes:
+    name=prodNode.getAttribute('name')
+    products[name]=prodNode.getAttribute('desc')
+    pkeys.append(name)
+    
+
+tupleList = [(x.lower(), x) for x in pkeys]
+tupleList.sort()
+for p in [x[1] for x in tupleList]:
+    print "    %-20s - %s" % (p, products[p])

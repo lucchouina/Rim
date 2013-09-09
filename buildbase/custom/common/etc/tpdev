@@ -1,0 +1,11 @@
+#
+# Development only script.
+# This script is part of the dbg module and will not be present on 
+# deployed systems.
+#
+
+#
+# start the portmap so we can perform some NFS mounts
+portmap
+
+#

@@ -1,0 +1,239 @@
+#! /bin/bash
+stty -echoprt -echoctl echoe
+
+export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
+#exec < /dev/console > /dev/console 2>&1
+
+mount -n -t tmpfs -o mode=0755 udev /dev
+mknod /dev/console c 5 1
+mknod /dev/null c 1 3
+mknod /dev/kmsg c 1 11
+mkdir -p /dev/pts
+mkdir -m 1777 /dev/shm
+ln -s /proc/self/fd /dev/fd
+ln -s fd/0 /dev/stdin
+ln -s fd/1 /dev/stdout
+ln -s fd/2 /dev/stderr
+
+# mount basic pseudo filesystems
+#
+mount -n -tproc proc /proc
+mount -n -tsysfs sysfs /sys
+mount -n -ttmpfs tmpfs /run
+
+#
+# make sure we set the critical kernel flags properly
+# incl. panic, oops and reboot behaviors asap.
+#
+sysctl -e -p /etc/sysctl.conf 1>/dev/null
+
+kernel_cmdline="$@"
+echo "" > /proc/sys/kernel/hotplug
+
+# Default timeout is 30 seconds
+udev_timeout=30
+
+for o in $(cat /proc/cmdline); do
+    if [ "$z_arg" ] ; then
+	    init_args="$init_args $o"
+	    z_arg=
+	    continue
+    fi
+    case $o in
+    nopivot)
+        nopivot=1
+    ;;
+    idebug)
+        initopt="--verbose"
+        set -vx
+    ;;
+    cleancache)
+        clean=1
+    ;;
+    allstop)
+        allstop=1
+    ;;
+    ip=dhcp)
+        nfs=1
+    ;;
+    linuxrc=trace)
+        echo -n "cmdline: "
+	    for arg in $@; do
+	        echo -n "$arg "
+	    done
+	    echo ""
+	    set -x
+	    debug_linuxrc=1
+	;;
+    sysrq=yes|sysrq=1)
+	    echo 1 > /proc/sys/kernel/sysrq
+	;;
+    -z)
+	    init_args="$init_args $o"
+	    z_arg=1
+	;;
+    -s)
+	    runlevel=s
+	;;
+    -b|emergency)
+	    init_args="$init_args emergency"
+	;;
+    -a|auto)
+	    init_args="$init_args auto"
+	;;
+    1|2|3|4|5|S|s|single)
+	    runlevel=$o
+	;;
+    rw)
+       read_write=1
+       ;;
+    ro)
+       read_only=1
+       ;;
+    esac
+done
+echo " Starting udev"
+/sbin/start_udev
+echo "Waiting for ram1 device"
+count=0
+while [ ! -b /dev/ram1 ]
+do 
+    sleep 1
+    count=$(($count+1))
+    if [ $count == 2 ]
+    then
+        mknod /dev/ram1         b 1 1
+        # SD/MMC support
+        mknod /dev/mmcblk0      b 179 0
+        mknod /dev/mmcblk0p1    b 179 1
+        mknod /dev/mmcblk0p2    b 179 2
+        mknod /dev/mmcblk0p3    b 179 3
+        # usb Mass Storage support (Usb stick)
+        mknod /dev/uba          b 180 0
+        mknod /dev/uba1         b 180 1
+        mknod /dev/uba2         b 180 2
+        mknod /dev/uba3         b 180 3
+        mknod /dev/tty0         c 4 0
+        mknod /dev/tty1         c 4 1
+        for l in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
+        do
+            mknod /dev/loop${l} b 7 $l
+        done
+        break
+    fi
+done
+
+function all_stop
+{
+    PATH=$PATH PS1='$ ' /bin/bash
+    if [ "$1" != "0" ]; then /sbin/reboot -f; fi
+}
+
+if [ "$allstop" ]; then all_stop 0; fi
+
+#
+# create a writable tmp
+#
+(mkfs -t ext3 /dev/ram1 && mount /dev/ram1 /tmp) 1>/dev/null 2>&1 || all_stop 0
+
+if [ "$trace" == 1 ]
+then
+    exec 2>>/tmp/bringup.trace
+    set -vx
+fi
+#
+# source basic rim functions in...
+#
+. sbin/rimFuncs
+setNodeEarlyEnvironment
+
+#
+# check if this is a scratch install i.e. version == scratch
+#
+if [ "$version" == "scratch" ]
+then
+    #
+    # this call will interact with the user and by the end will have either
+    # 1) clean and rerun setUpDisk and install the version in the iso
+    # or
+    # 2) will abort and reboot (based on user responce)
+    #
+    # So, on the way back we can go ahead and boot from that version.
+    . /sbin/scratchInstall # defines functions only
+    # give the kernel usb driver a chance to configure a stick, if any;
+    #  otherwise it spews messages over top of the yes/no prompt, and
+    #   potentially sets up a race condition if the tech at the kbd
+    #    is really quick
+    sleep 2
+    scratchIt $nfs || all_stop
+    export rim_node rim_variant
+else
+    (cd /sbin && ./setUpDisk)
+fi
+#
+# Load any drivers that are needed to do the job here
+#
+# initDrivers
+
+#
+# check environement for version specification
+#
+function mountIt()
+{
+    if [ "$version" ]
+    then
+        cd /soft/$version  && ./mountVersion && ismounted=1 || (
+                echo "Could not go to version dir /soft/$version"
+                exit 1
+        )
+    else
+        echo "Boot version unspecified - will drop to single user."
+    fi
+}
+
+mountIt
+
+if [ "$version" -a "$ismounted" -a ! "$nopivot" ]
+then
+    #
+    # pivot
+    cd /soft/$version/altroot
+    #
+    # create position of booted root
+    mkdir -p $PIVOT
+    # get rid of udevd - tpinit will restart it.
+    killall udevd
+    umount -n /proc
+    umount -n /sys 2>/dev/null
+    umount -n /dev 2>/dev/null
+    /sbin/pivot_root . $PIVOT && (
+        rm -rf /soft /data
+        ln -s $PIVOT/soft /soft 2>/dev/null
+        ln -s $PIVOT/data /data 2>/dev/null
+        umount -n /$PIVOT/dev 2>/dev/null
+        umount -n /$PIVOT/tmp 2>/dev/null
+        # create a new on-disk tmp
+        /bin/rm -rf /tmp
+        rm -rf /$PIVOT/data/tmp
+        find /var/run -type f -exec rm -f {} \;
+        /bin/hostname -b -F /etc/hostname
+        mkdir -p /$PIVOT/data/tmp
+        chmod 777 /$PIVOT/data/tmp
+        ln -s /$PIVOT/data/tmp /tmp
+        rm -f /var/run/*.pid 2>/dev/null
+    )
+    # check for a pending reset
+    if [ -f etc/reset.cfg ]
+    then
+        echo " ===== Factory reset post-install - START ====="
+        /usr/sbin/chroot . /sbin/rimDoReset
+        echo " ===== Factory reset post-install - END   ====="
+    fi
+    # Let the system come up
+    exec /usr/sbin/chroot . /sbin/init $initopt < /dev/console > /dev/console
+    # exec /usr/sbin/chroot . /bin/bash $initopt < /dev/console > /dev/console
+    echo "Failed to execute chroot and its init."
+fi
+
+all_stop 

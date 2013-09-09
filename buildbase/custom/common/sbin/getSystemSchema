@@ -1,0 +1,23 @@
+#!/usr/bin/env python
+
+""" get_systeminfo
+
+Code to retrieve system settings from the system.
+
+This returns a JSON object that is a nested structure
+
+"""
+
+import simplejson as json
+
+import sys
+
+from settings.system import *
+
+keys=[]
+if len(sys.argv) > 1: keys=sys.argv[1:]
+else: keys=[]
+
+handlers, interests, root, schema = get_systeminfo(keys)
+
+print json.dumps(schema, sort_keys=True, indent=4)

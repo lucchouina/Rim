@@ -1,0 +1,6 @@
+#! /bin/bash
+#
+# run a set of actions based on bom
+#
+. /sbin/rimFuncs
+rimRunAction $*

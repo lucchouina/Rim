@@ -1,0 +1,1 @@
+/usr/share/pyshared/zope.interface-3.5.3.egg-info/namespace_packages.txt

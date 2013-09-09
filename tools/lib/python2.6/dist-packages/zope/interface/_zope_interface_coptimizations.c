@@ -1,0 +1,1 @@
+/usr/share/pyshared/zope/interface/_zope_interface_coptimizations.c

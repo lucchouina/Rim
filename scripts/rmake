@@ -1,0 +1,81 @@
+#! /usr/bin/env /usr/bin/python
+#
+# This script will print on stdout the environment setup commands so that
+# the sourcing shell can build NODE specific kernels and u-boot.
+#
+import os
+import sys
+import glob
+import xml.dom.minidom
+import Rim
+import RimApp
+
+from SCons import Environment
+env=Environment.Environment()
+env.vars={}
+rim=Rim.Rim(env, Rim.Rim.Shared);
+
+# read in the entire configuration for that app and site
+appFile="%s/App.xml" % os.path.dirname(__file__)
+appNode=xml.dom.minidom.parse(appFile).getElementsByTagName('application')[0]
+app=RimApp.RimApp(appNode, rim, quiet=1)
+#
+# now that we have the app, scan all products and nodes and make a list of 
+# os/release/version/arch paths that we need
+#
+bins="""
+	CC
+	AS
+	AR
+	CXX
+    LINK
+""".split()
+others="""
+    CFLAGS
+    LDFLAGS
+    PATH
+    CROSS_COMPILE
+    ARCH
+""".split()
+list={}
+for prodName in app.products:
+    prod=app.products[prodName]
+    for nodeName in prod.nodes:
+        node=prod.nodes[nodeName]
+        for compName in node.compis:
+            comp=node.compis[compName]
+            path=os.path.dirname(comp.env['CC'])
+            prefix=os.path.basename(comp.env['CC'])
+            l=prefix.split("-")
+            arch=l[0]
+            l.pop()
+            prefix='-'.join(l)+'-'
+            env=os.environ
+            env["PATH"]="/sbin:/usr/sbin:/bin:/usr/bin:%s" % path
+            env["CROSS_COMPILE"]="%s" % prefix
+            for b in bins:
+                env[b]=comp.env[b]
+            ldpaths=""
+            for path in comp.env['LIBPATH']:
+                ldpaths="%s -L%s -Wl,-rpath-link=%s" % (ldpaths, path, path)
+            cppflags="" 
+            for path in comp.env['CPPPATH']:
+                cppflags="%s -I%s" % (cppflags, path)
+            env["CC"]=env["CXX"]
+            env["CFLAGS"]=cppflags+ldpaths
+            env["CPPFLAGS"]=cppflags
+            env["LDFLAGS"]=ldpaths
+            env["ARCH"]="%s" % rim.archkmap(arch)
+            env["PS1"]="Rim-%s%s>> " % (prefix, rim.archmap(arch))
+            for var in bins+others:
+                print "[%s]\n    %s" % (var, env[var])
+            args=( sys.argv[0], "--norc")
+            if len(sys.argv) > 1:
+                shell=sys.argv[1]
+                (args.append(arg) for arg in sys.argv[1:])
+            else:
+                shell="/bin/bash"
+                (args.append(arg) for arg in sys.argv)
+            os.execvpe("/bin/bash", args, env)
+            print "Could not execute any shell!"
+            sys.exit(1)

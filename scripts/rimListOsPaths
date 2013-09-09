@@ -1,0 +1,36 @@
+#! /usr/bin/env /usr/bin/python
+import os
+import glob
+import xml.dom.minidom
+import Rim
+import RimApp
+
+rim=Rim.Rim()
+mypath="/".join(os.path.abspath(__file__).split("/")[0:-1])
+fname="%s/App.xml" % mypath
+#
+# for each file -> local and search for application
+conf = xml.dom.minidom.parse(fname)
+#
+# Look for an application block in this one
+appNode=conf.getElementsByTagName('application')[0]
+#
+name=appNode.getAttribute('name')
+rim.addVar('RIM_APPLICATION', appNode.getAttribute('name'))
+app=RimApp.RimApp(appNode, rim, 1)
+
+#
+# now that we have the app, scan all products and nodes and make a list of 
+# os/release/version/arch paths that we need
+#
+list={}
+for prodName in app.products:
+    prod=app.products[prodName]
+    for nodeName in prod.nodes:
+        node=prod.nodes[nodeName]
+        for compName in node.compis:
+            comp=node.compis[compName]
+            list[comp.rootRelDir]=1
+
+for dir in list:
+    print dir

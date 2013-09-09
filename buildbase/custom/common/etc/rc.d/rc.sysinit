@@ -1,0 +1,143 @@
+#!/bin/bash
+#
+# /etc/rc.d/rc.sysinit - run once at boot time
+#
+
+HOSTNAME=`/bin/hostname`
+HOSTTYPE=`uname -m`
+unamer=`uname -r`
+
+if [ -f /etc/sysconfig/network ]; then
+    . /etc/sysconfig/network
+fi
+if [ -z "$HOSTNAME" -o "$HOSTNAME" = "(none)" ]; then
+    HOSTNAME=localhost
+fi
+
+rm -f /var/lock/subsys/*
+
+if [ ! -e /proc/mounts ]; then 
+	mount -n -t proc /proc /proc
+	mount -n -t sysfs /sys /sys >/dev/null 2>&1
+fi
+
+mount -f /proc >/dev/null 2>&1
+mount -f /sys >/dev/null 2>&1
+mount -f /dev/pts >/dev/null 2>&1
+mount -f /proc/bus/usb >/dev/null 2>&1
+
+. /etc/init.d/functions
+
+/sbin/start_udev 2>/dev/null
+
+# Set the system clock.
+update_boot_stage RCclock
+ARC=0
+SRM=0
+UTC=0
+
+if [ -f /etc/sysconfig/clock ]; then
+   . /etc/sysconfig/clock
+
+   # convert old style clock config to new values
+   if [ "${CLOCKMODE}" = "GMT" ]; then
+      UTC=true
+   elif [ "${CLOCKMODE}" = "ARC" ]; then
+      ARC=true
+   fi
+fi
+
+CLOCKDEF=""
+CLOCKFLAGS="$CLOCKFLAGS --hctosys"
+
+case "$UTC" in
+    yes|true)	CLOCKFLAGS="$CLOCKFLAGS --utc"
+		CLOCKDEF="$CLOCKDEF (utc)" ;;
+    no|false)	CLOCKFLAGS="$CLOCKFLAGS --localtime"
+		CLOCKDEF="$CLOCKDEF (localtime)" ;;
+esac
+case "$ARC" in
+    yes|true)	CLOCKFLAGS="$CLOCKFLAGS --arc"
+		CLOCKDEF="$CLOCKDEF (arc)" ;;
+esac
+case "$SRM" in
+    yes|true)	CLOCKFLAGS="$CLOCKFLAGS --srm"
+		CLOCKDEF="$CLOCKDEF (srm)" ;;
+esac
+
+/sbin/hwclock $CLOCKFLAGS
+
+action $"Setting clock $CLOCKDEF: `date`" /bin/true
+
+# Fix console loglevel
+if [ -n "$LOGLEVEL" ]; then
+	/bin/dmesg -n $LOGLEVEL
+fi
+
+
+# Only read this once.
+cmdline=$(cat /proc/cmdline)
+
+# Configure kernel parameters
+update_boot_stage RCkernelparam
+sysctl -e -p /etc/sysctl.conf >/dev/null 2>&1
+
+# Set the hostname.
+update_boot_stage RChostname
+action $"Setting hostname ${HOSTNAME}: " hostname ${HOSTNAME}
+
+# Initialize pseudo-random number generator
+if [ -f "/var/lib/random-seed" ]; then
+	cat /var/lib/random-seed > /dev/urandom
+else
+	touch /var/lib/random-seed
+fi
+chmod 600 /var/lib/random-seed
+dd if=/dev/urandom of=/var/lib/random-seed count=1 bs=512 2>/dev/null
+
+# Clean out /.
+rm -f /fastboot /fsckoptions /forcefsck /.autofsck /halt /poweroff &> /dev/null
+
+# Reset pam_console permissions
+[ -x /sbin/pam_console_apply ] && /sbin/pam_console_apply -r
+
+# Clean up utmp/wtmp
+> /var/run/utmp
+
+touch /var/log/wtmp
+chgrp utmp /var/run/utmp /var/log/wtmp
+chmod 0664 /var/run/utmp /var/log/wtmp
+if [ -n "$_NEED_XFILES" ]; then
+  > /var/run/utmpx
+  touch /var/log/wtmpx
+  chgrp utmp /var/run/utmpx /var/log/wtmpx
+  chmod 0664 /var/run/utmpx /var/log/wtmpx
+fi
+
+rm -f /var/run/*.pid
+
+# Set up binfmt_misc
+/bin/mount -t binfmt_misc none /proc/sys/fs/binfmt_misc > /dev/null 2>&1
+
+# Now that we have all of our basic modules loaded and the kernel going,
+# let's dump the syslog ring somewhere so we can find it later
+dmesg -s 131072 > /var/log/dmesg
+
+# so we can do NFS mounts 
+portmap
+
+# mksquashfs might not support setuid !?
+# need to do an explicite chmod on these...
+chmod 4755 /bin/su
+chmod 4755 /usr/bin/sudo
+chmod 0440 /etc/sudoers
+chmod 4755 /bin/ping
+chmod 4755 /usr/bin/script
+chmod 4755 /usr/bin/script
+chmod 4755 /usr/bin/passwd
+
+# turn on swap
+swapon /dev/md5
+
+# reduce verbosity of console logs
+echo 1 > /proc/sys/kernel/printk

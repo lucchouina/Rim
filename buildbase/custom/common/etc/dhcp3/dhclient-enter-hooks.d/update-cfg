@@ -1,0 +1,6 @@
+
+[ "$interface" == eth0 ] && [ "$new_ip_address" ] && (
+
+    echo '{"IPInfo":{"IPAddress":"'${new_ip_address}'","Gateway":"'${new_routers}'","SubnetMask":"'${new_subnet_mask}'"}}' | setSystemInfo -n > /dev/null
+
+)

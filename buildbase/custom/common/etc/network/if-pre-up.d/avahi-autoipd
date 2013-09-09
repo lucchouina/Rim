@@ -1,0 +1,28 @@
+#!/bin/bash
+
+#
+# Verify that the bonjour configuration service needs to be started
+# on an interface that just came up.
+#
+
+[ "$IFACE" != "lo"   ] || exit 0
+export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
+. /lib/lsb/init-functions
+#
+# check first if we have any bonjour servioces defined
+#
+[ "`ls /etc/avahi/services/*.service` 2>/dev/null" ] || exit 0
+#
+# only enable the bonjour ip on interfaces that we have chosen
+#
+for int in "$bonjourInterfaces"
+do
+    # check if that interface is part of the bonjour interface
+    # listed for that Node in the rim App config xml file
+    #
+    if [ $int == $IFACE ]
+    then
+        /usr/sbin/avahi-autoipd --force-bind -D $IFACE
+    fi
+done
+exit 0

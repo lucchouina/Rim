@@ -1,0 +1,65 @@
+import os
+import glob
+import xml.dom.minidom
+
+# rim
+import Rim
+import RimApp
+import RimCore
+
+from SCons import Environment
+env=Environment.Environment()
+env.vars={}
+
+rim=Rim.Rim(env, Rim.Rim.Shared);
+#
+# Because we associate a rimTag.o to each produced executable
+# we expect to have multiple env() express the same target
+# So turn that one off
+#
+rim.env.SetOption('warn', 'no-Duplicate-Environment')
+rim.addVar('RIMROOT', "ENV")
+rim.addIncDirs([ rim.translate("${RIMROOT}/build") ])
+rim.addCppFlags("-DRIM")
+
+Export('env')
+
+Apps={} 
+
+if os.environ.has_key('RIM_APPLICATION'):
+    thisApp=os.environ['RIM_APPLICATION']
+else:
+    thisApp=0
+#
+# get the list fo all applications defined in ${RIMROOT}/build files.
+for fname in glob.glob(rim.rimConfPath+'/*.xml'):
+    #
+    # for each file -> local and search for application
+    conf = xml.dom.minidom.parse(fname)
+    #
+    # Look for an application block in this one
+    appNodes=conf.getElementsByTagName('application')
+    for appNode in appNodes:
+        #
+        # check for a match with user's environment
+        # User could have no such environment which means all applications
+        # shoudl be build.
+        #
+        if not thisApp or thisApp==appNode.getAttribute('name'):
+            name=appNode.getAttribute('name')
+            rim.addVar('RIM_APPLICATION', appNode.getAttribute('name'))
+            Apps[name]=RimApp.RimApp(appNode, rim)
+                
+#
+# the tools construction help script uses the defined model
+# and current app-product-node context to drive the tool builds
+#
+if os.environ.has_key('RIM_SYNCUP'):
+    rim.env.Apps=Apps;
+    rim.subdirs(rim.getVar('toolsRoot')+'/workspace');
+else:
+    #
+    # Process all applications
+    for App in Apps:
+        print "Building App %s" % App
+        Apps[App].buildIt()

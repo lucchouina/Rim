@@ -1,0 +1,54 @@
+#! /bin/bash
+### BEGIN INIT INFO
+# Provides:          rim
+# Required-Start:    postgres
+# Required-Stop:
+# Default-Start:     3 5
+# Default-Stop:      0 1 6
+# Short-Description: Rim first boot management and up/down hooks execution
+# Description:       Run all firstboot and up/down module hooks by looking inside the
+#                    bom file.
+### END INIT INFO
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+. /lib/lsb/init-functions
+. /sbin/rimFuncs
+setNodeEnvironment
+
+cd /soft/$version
+
+do_stop () {
+	log_action_msg "DOWN:"
+    down
+}
+
+do_up () {
+	log_action_msg "UP:"
+    up
+}
+
+if [ "$1" == start -a -f /firstboot ]
+then
+    log_action_msg "Firstboot:"
+    /bin/rm /firstboot
+    firstboot
+fi
+
+case "$1" in
+  start)
+    do_up
+	;;
+  restart)
+	do_stop
+    do_up 
+	;;
+  stop)
+	do_stop
+	;;
+  *)
+	echo "Usage: $0 start|stop|restart" >&2
+	exit 3
+	;;
+esac
+exit 0

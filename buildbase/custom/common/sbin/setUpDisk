@@ -1,0 +1,156 @@
+#! /bin/bash
+
+nMd=3
+mDevices=(1 2 3)
+
+scratch="$3"
+
+[ -f ./rimFuncs ] && . ./rimFuncs
+[ ! -f ./rimFuncs ] &&  [ -f /sbin/rimFuncs ] && . /sbin/rimFuncs
+setNodeEarlyEnvironment
+
+# mark an active deive as failed
+function createRaid # devName
+{
+    dev1=/dev/${diskNames[0]}$pprefix$1
+    dev2=/dev/${diskNames[1]}$pprefix$1
+    [ -b $dev1 ] || dev1=missing
+    [ -b $dev2 ] || dev2=missing
+    if [ "$raided" ] 
+    then
+        rm -f /dev/md$1
+        ln -s ${diskNames[0]}$pprefix$1 /dev/md$1
+    else
+        # make sure we do not already have this one done
+        if [ ! "`(mdadm -D /dev/md$1 | grep $dev1 | awk '{print $7}') 2>/dev/null`" ]
+        then
+            echo -n "Creating array /dev/md$1 with disks [$dev1,$dev2]..."
+            capture mdadm --create /dev/md$1 --assume-clean --metadata=0.90 --auto=md --force --level=1 --raid-devices=2 --run $dev1 $dev2 || (
+                ln -s $dev1 /dev/md$1
+            )
+            echo "Done."
+        fi
+    fi
+}
+
+function mountFs # partition mnt_point
+{
+    capture [ -d $2 ] || mkdir -p $2
+    #
+    # check if we already are mounted (could be an install over a previous install)
+    #
+    fsId1=`stat -c "%i" -f /`
+    fsId2=`stat -c "%i" -f $2`
+    if [ $fsId1 == $fsId2 ]
+    then
+        echo "Mounting /dev/md$1 on $2"
+        if [ "$scratch" ]
+        then
+            echo -n "Creating filesystems for $2..."
+            capture mkfs -t ext3 -I 128 /dev/md$1 || abort "Failed to create filesystem on /dev/md$1"
+        else
+            fsck -y /dev/md$1 2>/dev/null 1>&2
+        fi
+        mount -n -t ext3 /dev/md$1 $2 2>/dev/null || (
+            echo -n "Creating filesystems for $2..."
+            capture mkfs -t ext3 -I 128 /dev/md$1 || abort "Failed to create filesystem on /dev/md$1"
+            capture mount -n -t ext3 /dev/md$1 $2 || abort "Failed to mount /dev/md$1"
+            echo "Done."
+        )
+    fi
+    echo "/dev/md$1 mounted on $2"        
+}
+
+#
+# check if we already are mounted (could be an install over a previous install)
+#
+fsIdRoot=`stat -c "%i" -f /`
+[ -d /${rimPubSoft} ] && fsIdSoft=`stat -c "%i" -f /${rimPubSoft}` || fsIdSoft=$fsIdRoot
+[ -d /${rimPubData} ] && fsIdData=`stat -c "%i" -f /${rimPubData}`|| fsIdData=$fsIdRoot
+#
+# If both /soft and /data are already setsup - do nothing.
+if [ "$fsIdRoot" == "$fsIdSoft" -o "$fsIdRoot" == "$fsIdData" ]
+then
+    #
+    # check if the Rim arrays already exist
+    #
+    if [ ! "$raided" ] 
+    then
+        for mdev in ${mDevices[*]}; do mdadm -D /dev/md$mdev 2>/dev/null 1>&2 || notFound=1; done
+        if [ "$notFound" ]
+        then
+            # make sure all md references are cleared on scratch 
+            if [ "$scratch" ]
+            then
+                for p in 1 2 3 4 5
+                do
+                    [ -b /dev/${diskNames[0]} ] && mdadm --zero-superblock --force /dev/${diskNames[0]}$p 2>/dev/null
+                    [ -b /dev/${diskNames[1]} ] && mdadm --zero-superblock --force /dev/${diskNames[1]}$p 2>/dev/null
+                done
+            fi
+            # Create partitions on both drives...
+            [ -b /dev/${diskNames[0]} ] && partitionDrive ${diskNames[0]} 1
+            [ -b /dev/${diskNames[1]} ] && partitionDrive ${diskNames[1]} 1
+
+            # ... and make sure we can boot from it.
+            doGrub=1
+
+            #
+            # Create the new md devices [ 1, 2, 3 ]
+            #
+            for mdNum in ${mDevices[*]}
+            do
+                createRaid $mdNum
+            done
+            # Mark swap as such
+            mkswap -f /dev/md2        
+        fi
+    else
+        #
+        # Create the new md devices [ 1, 2, 3 ]
+        #
+        for mdNum in ${mDevices[*]}
+        do
+            mdadm --zero-superblock --force /dev/${diskNames[0]}$mdNum 2>/dev/null
+            rm -f /dev/md$mdNum
+            ln -s ${diskNames[0]}$pprefix$mdNum /dev/md$mdNum
+        done
+        doGrub=1
+        partitionDrive ${diskNames[0]} 1
+        # Mark swap as such
+        mkswap -f /dev/md2        
+    fi
+
+    mountFs 1 /${rimPubSoft}
+    
+    #
+    # make swap available
+    #
+    swapon /dev/md2
+    
+    #
+    # Prime the grub are
+    #
+    if [ ! -d /${rimPubSoft}/grub ] 
+    then
+        #
+        # only if this is meant to be a grub (not uboot) node
+        #
+        if [ -d /boot/grub ] 
+        then
+            cp -r /boot/grub /soft || abort "Failed priming grub directory"
+        else
+            # non-grub 
+            unset doGrub
+        fi
+    fi
+    if [ "$doGrub" ]
+    then
+        [ -b /dev/${diskNames[0]} ] && mkBootable ${diskNames[0]} 0
+        [ -b /dev/${diskNames[1]} ] && [ ! "$raided" ] && mkBootable ${diskNames[1]} 1
+    fi
+    mountFs 3 /${rimPubData}
+fi
+# need to do something that exits zero here or rebuildlRaid won't get run by scratch install
+#  might as well echo a message
+echo Done initial mirror setup.
