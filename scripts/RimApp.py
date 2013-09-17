@@ -353,6 +353,7 @@ class Service(RimCore.Variables):
                 print "Invalid component name '%s' in service '%s'. '%s'" % (cname, self.name, svcNode.toxml())
                 sys.exit(1)
             self.comps[cname]=app.components[cname]
+            self.env=self.copyEnvVars(app.components[cname].env)
     
 class Node(RimCore.Variables):
     def __init__(self, amfNode, svcnames, app, prod, quiet=0):
@@ -402,12 +403,14 @@ class Node(RimCore.Variables):
                 RimCore.rimcore.dbg(quiet, "            Reading Service - %s", svcname)
                 svc=app.services[svcname]
                 svcComps=svc.comps
+                self.env=self.copyEnvVars(svc.env)
                 #
                 # Find the component entry for this one.
                 for comp in svcComps:
                     if thisComp == "" or thisComp==svcComps[comp].name:
                         self.compis[svcComps[comp].name]=CompInstance(svcComps[comp], app, prod, svc, self, quiet)
                 Rim.popAppLibs(prod, self)
+        self.env=self.copyEnvVars(prod.env)
                 
     def buildIt(self):
         print "        Node %s" % (self.amfi.name)
@@ -812,7 +815,8 @@ class RimApp(RimCore.Variables):
             #
             bNode1=self.rim.env.File(product.artifacts+"/bom.xml");
             bNode2=self.rim.env.File(product.artifacts+"/bom.sh");
-            bNode3=self.rim.env.File(product.artifacts+"/vars.rim.sh");
+            bNode3=self.rim.env.File(product.artifacts+"/bom.py");
+            bNode4=self.rim.env.File(product.artifacts+"/vars.rim.sh");
 
             self.rim.setApplicationName(self.name)
             self.rim.setApplicationVersion(self.version)
@@ -824,5 +828,5 @@ class RimApp(RimCore.Variables):
                 tNode=self.rim.env.File("%s/%s.tgz" % (product.repos, tag))
                 sNode=self.rim.env.File("%s/%s.upg" % (product.repos, tag))
                 kNode=self.rim.env.File("%s/software.prv_key" % (product.repos))
-                self.rim.env.TarBall([ tNode ] , [ bNode1, bNode2, bNode3 ] + defmod + self.addSupportScripts(product))
+                self.rim.env.TarBall([ tNode ] , [ bNode1, bNode2, bNode3, bNode4 ] + defmod + self.addSupportScripts(product))
                 self.rim.env.SignedUpg([ sNode ] , [ tNode, kNode ])

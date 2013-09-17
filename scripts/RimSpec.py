@@ -76,7 +76,7 @@ class module(RimCore.Variables):
     indent="                        "
     def __init__(self, modXmlNode, spec):
         #print "module.__init__ checkpoint A: %s" % time.asctime()
-        self.env=spec.env
+        self.env=self.copyEnvVars(spec.env)
         self.getVars(modXmlNode);
         self.name=self.translate(modXmlNode.getAttribute("name"));
         self.owner=self.translate(modXmlNode.getAttribute("owner"));

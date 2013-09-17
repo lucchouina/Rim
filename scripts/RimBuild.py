@@ -261,10 +261,10 @@ def buildBom(target, source, env):
    
     xmlfile=fileln(target[0].abspath, 'w')
     shfile=fileln(target[0].abspath[0:-4]+".sh", 'w')
+    varfile=open(target[0].abspath[0:-4]+".py", 'w')
     xmlfile.write("<?xml version='1.0' ?>")
     xmlfile.write('<bom version="1.0">')
     shfile.write("#\n# This is a copy of the Bom .xml file suitable for consumption in scripts\n#\n\n")
-    postHelpInfo(shfile);
     for varname in sorted(lut):
         if os.environ.has_key(lut[varname]):
             envval=os.environ[lut[varname]]
@@ -413,6 +413,29 @@ def buildBom(target, source, env):
     shfile.write("numNodes=%d" % (len(nodeList)))
     shfile.close()
     #
+    # go through App+Product+Amfi+Services+Components and create a flat dict suitable
+    # for consumption by pythons scripts though the rim module's getVars() method.
+    varlist={}
+    # app
+    varlist.update(env.rim.app.varList())
+    # product
+    varlist.update(env.rim.prod.varList())
+    # nodes of the product
+    for amfi in env.prod.nodes:
+        varlist.update(env.prod.nodes[amfi].varList())
+    for serviceName in env.app.services:
+        varlist.update(env.app.services[serviceName].varList())
+        for compName in env.app.components:
+            varlist.update(env.app.components[compName].varList())
+    # Since all services and component variables are agregated to the amfi
+    # we shoudl have everything we need. Maybe we need CML and other platform model
+    # variables as well...[future]
+    varfile.write("{\n")
+    for key in sorted(varlist.keys()):
+        varfile.write('    "%s" : "%s",\n' %( key, varlist[key].replace('"', '\\"') ))
+    varfile.write("}\n")
+    
+    #
     # That is the signal we can increment the build number
     #
     env.rim.incBuildNumber(dirUp)
@@ -501,84 +524,3 @@ def registerBuilders(env):
     env['BUILDERS']['Bom']=bldBom
     env['BUILDERS']['TarBall']=bldTarBall
     env['BUILDERS']['SignedUpg']=bldSignedUpg
-
-def postHelpInfo(shfile):
-    shfile.write('''
-###############################################################################################
-#
-# The post-install context makes these environment variables available.
-# The post-install context runs these scripts in a chroot'ed environment
-# where the '/' is what has just been installed and from which the scripts
-# have been extracted. And where the $rimCurRoot variable (see below) points
-# to the re-mounted '/' of the currently running version.
-# 
-# 
-# rimApplication - name of the application we are being installed for (example: S2)
-# rimApplicationVersion - version of the application we are being installed for (example: 4.1.0)
-# rimBuildNumber - build number just installed (example: 038)
-# rimProduct - name of the application we are being installed for (example: Release)
-# rimOS - name of the operating system (example: Linux|Solaris)
-# rimOsRelease - name of the operating system release (example: Ubuntu|Suse)
-# rimReleaseVersion - version of the operating system release (example: lts10.4|11.4|4.1)
-# rimModule - name of the module just installed (example: Postgres|Java|S2common)
-# rimModuleVersion - version of the module just installed (example: 9.0|jdk6.0|1.2)
-# rimNode - name of the application just installed for (example: Global|Netvault)
-# 
-#
-# Build specific variables are also made available
-#
-# rimBuildInfo="BLD_INFO"
-# rimBuildLabel="S2-RELEASE-4.1.0-033"
-# rimBuildTime="Sun Oct  9 15:51:49 PDT 2011"
-# rimBuildUser="lchouinard"
-# rimBuildView="http://192.168.0.213/svn/branches/global_luc"
-# 
-# rimPrivSoft -  Version private data directory 
-#                ex: /soft/$rimApplication-$rimProduct-$rimApplicationVersion-$buildNumber
-#                e.g. /soft/S2-RELEASE-4.1.0-017
-# rimPrivData -  Version private data directory 
-#                ex: /data/$rimApplication-$rimProduct-$rimApplicationVersion-$buildNumber
-#                e.g. /data/S2-RELEASE-4.1.0-017
-# rimPubData -   Global data directory (exists and is shared accross all versions)
-#                currently: /data
-# 
-# Variables representing information on the version that is currently installed:
-# 
-# curRimPrivSoft - Private software repository of the running version 
-#                  (if empty - no version is running. We are doing a scratch install)
-#                  ex: /soft/S2-RELEASE-4.1.0-005
-# curRimRoot - the position where the unified runtime of the running version has
-#              been mounted in the current context. It is obviously mounted as '/'
-#              in the real runtime (non chroot'ed context).
-# You can add the "cur" prefix to all the variables listed above and capitalize the 'r'.
-# For example:
-# curRimPrivData - Version private data directory for the running version
-# curRimApplicationVersion - version of the application for the running version (example: 3.8.0)
-###############################################################################################
-#
-# Exit status (and variable exchanges between scripts).
-#
-# The scripts are ran as bash functions. 
-# Thus the scripts most not use the ''exit'' but use ''return'' instead.
-#
-# The caller is a normal bash that sets up the context and then runs each script in the order
-# of their rank. The lower the rank value the sooner it will get run in the context.
-#
-# Not using a new instance of bash for each individual script enables scripts from one module
-# to create new bash variables that can be accessed by the script of another module. As long
-# as the rank of that other module is higher then the first obviously.
-#
-###############################################################################################
-#
-# Files and debugging
-#
-# The caller of the scripts (the single parent bach process) will run the entire script inside
-# a single script(1) session. This way, all output or input, either from stdout/stderr or direct
-# user interactions (via the tty) can be captured.
-#
-# The captured output will be sent to a 'trace' file in the directory specified by the 
-# 'traceRoot' variable in the application xml file.
-#
-###############################################################################################
-
-''');

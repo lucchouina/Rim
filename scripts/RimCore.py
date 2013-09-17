@@ -97,8 +97,14 @@ class Variables(Rimcore):
         return matches
         
     def copyEnvVars(self, env):
+        curVars={}
+        try:
+            curVars=self.env.vars
+        except:
+            pass
         myenv=env.Clone();
         myvars=env.vars.copy()
+        myvars.update(curVars)
         myenv.vars=myvars
         return myenv
             
@@ -120,21 +126,18 @@ class Variables(Rimcore):
             self.env.vars[name]=self.translate(value)
         #print "    %s=%s" % (name, self.env.vars[name])
         
-    def addVars(self, frm, to, show=0):
+    def addVars(self, frm, to, show=""):
         for kv in frm.env.vars:
-            if show:
-                print "    %s=%s" % (kv,frm.env.vars[kv])
             to.addVar(kv,frm.env.vars[kv])
 
-    def getVars(self, varNode, show=0):
-        if show:
-            print "Show is on!"
+    def getVars(self, varNode, show=""):
         for var in self.getChildrenByTagName(varNode, 'var'):
             name=var.getAttribute('name')
             value=var.getAttribute('value')
-            if show:
-                print "    %s=%s" % (name,value)
             self.addVar(name, value)
+
+    def varList(self):
+        return self.env.vars
 
     def getVar(self, name, fail=0):
         if self.env.vars.has_key(name):

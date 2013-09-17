@@ -51,7 +51,8 @@ for prodName in app.products:
             l.pop()
             prefix='-'.join(l)+'-'
             env=os.environ
-            env["PATH"]="/sbin:/usr/sbin:/bin:/usr/bin:%s" % path
+            rimTools="%s/tools/bin/%s " % (os.getenv('RIMBASE'),  os.uname()[4])
+            env["PATH"]="/sbin:/usr/sbin:/bin:/usr/bin:%s:%s" % (path, rimTools)
             env["CROSS_COMPILE"]="%s" % prefix
             for b in bins:
                 env[b]=comp.env[b]
